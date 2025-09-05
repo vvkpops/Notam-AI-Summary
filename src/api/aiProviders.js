@@ -1,39 +1,47 @@
-// Multi-provider AI API with Google Gemini as primary
+// Multi-provider AI API with Google Gemini 2.0 Flash as primary
 
 const AI_PROVIDERS = {
     gemini: {
-        name: "Google Gemini Pro",
-        maxTokens: 1000000,
+        name: "Google Gemini 2.0 Flash",
+        maxTokens: 1000000, // 1M token input limit
         responseTokens: 8192,
-        apiUrl: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent",
+        apiUrl: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent",
         headers: (apiKey) => ({
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'X-goog-api-key': apiKey // Updated header format for Gemini 2.0
         }),
         formatRequest: (messages, maxTokens) => {
             const systemMessage = messages.find(m => m.role === 'system');
             const userMessage = messages.find(m => m.role === 'user');
             
+            // Combine system and user messages for Gemini
+            const combinedText = systemMessage 
+                ? `${systemMessage.content}\n\n${userMessage.content}` 
+                : userMessage.content;
+            
             return {
                 contents: [{
                     parts: [{
-                        text: systemMessage ? `${systemMessage.content}\n\n${userMessage.content}` : userMessage.content
+                        text: combinedText
                     }]
                 }],
                 generationConfig: {
                     maxOutputTokens: Math.min(maxTokens, 8192),
                     temperature: 0.05, // Very low for precise technical details
                     topP: 0.8,
-                    topK: 40
+                    topK: 40,
+                    candidateCount: 1 // Single response for consistency
                 }
             };
         },
         extractResponse: (data) => {
             if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
+                console.error('Invalid Gemini response:', data);
                 throw new Error('Invalid Gemini response structure');
             }
             return data.candidates[0].content.parts[0].text;
         },
-        urlWithKey: (apiKey) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`
+        directUrl: (apiKey) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`
     },
     
     claude: {
