@@ -1,29 +1,8 @@
-// Multi-provider AI API with smart fallbacks
+// Multi-provider AI API with Google Gemini as primary
 
 const AI_PROVIDERS = {
-    claude: {
-        name: "Claude 3.5 Sonnet",
-        maxTokens: 200000,
-        responseTokens: 8192,
-        apiUrl: "https://api.anthropic.com/v1/messages",
-        headers: (apiKey) => ({
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-            'content-type': 'application/json'
-        }),
-        formatRequest: (messages, maxTokens) => ({
-            model: "claude-3-5-sonnet-20241022",
-            max_tokens: Math.min(maxTokens, 8192),
-            messages: messages.map(msg => ({
-                role: msg.role === 'system' ? 'user' : msg.role,
-                content: msg.role === 'system' ? `System: ${msg.content}` : msg.content
-            }))
-        }),
-        extractResponse: (data) => data.content[0].text
-    },
-    
     gemini: {
-        name: "Gemini 1.5 Pro",
+        name: "Google Gemini Pro",
         maxTokens: 1000000,
         responseTokens: 8192,
         apiUrl: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent",
@@ -42,30 +21,41 @@ const AI_PROVIDERS = {
                 }],
                 generationConfig: {
                     maxOutputTokens: Math.min(maxTokens, 8192),
-                    temperature: 0.1
+                    temperature: 0.05, // Very low for precise technical details
+                    topP: 0.8,
+                    topK: 40
                 }
             };
         },
-        extractResponse: (data) => data.candidates[0].content.parts[0].text,
+        extractResponse: (data) => {
+            if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
+                throw new Error('Invalid Gemini response structure');
+            }
+            return data.candidates[0].content.parts[0].text;
+        },
         urlWithKey: (apiKey) => `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`
     },
     
-    openai: {
-        name: "GPT-4o-mini",
-        maxTokens: 128000,
-        responseTokens: 4096,
-        apiUrl: "https://api.openai.com/v1/chat/completions",
+    claude: {
+        name: "Claude 3.5 Sonnet",
+        maxTokens: 200000,
+        responseTokens: 8192,
+        apiUrl: "https://api.anthropic.com/v1/messages",
         headers: (apiKey) => ({
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json'
         }),
         formatRequest: (messages, maxTokens) => ({
-            model: "gpt-4o-mini",
-            messages: messages,
-            max_tokens: Math.min(maxTokens, 4096),
-            temperature: 0.1
+            model: "claude-3-5-sonnet-20241022",
+            max_tokens: Math.min(maxTokens, 8192),
+            messages: messages.map(msg => ({
+                role: msg.role === 'system' ? 'user' : msg.role,
+                content: msg.role === 'system' ? `System: ${msg.content}` : msg.content
+            })),
+            temperature: 0.05
         }),
-        extractResponse: (data) => data.choices[0].message.content
+        extractResponse: (data) => data.content[0].text
     },
     
     cohere: {
@@ -86,10 +76,46 @@ const AI_PROVIDERS = {
                 message: userMessage.content,
                 preamble: systemMessage?.content,
                 max_tokens: Math.min(maxTokens, 4096),
-                temperature: 0.1
+                temperature: 0.05
             };
         },
         extractResponse: (data) => data.text
+    },
+    
+    openai: {
+        name: "GPT-4o-mini",
+        maxTokens: 128000,
+        responseTokens: 4096,
+        apiUrl: "https://api.openai.com/v1/chat/completions",
+        headers: (apiKey) => ({
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+        }),
+        formatRequest: (messages, maxTokens) => ({
+            model: "gpt-4o-mini",
+            messages: messages,
+            max_tokens: Math.min(maxTokens, 4096),
+            temperature: 0.05
+        }),
+        extractResponse: (data) => data.choices[0].message.content
+    },
+    
+    groq: {
+        name: "Llama 3.3 70B",
+        maxTokens: 6000,
+        responseTokens: 1000,
+        apiUrl: "https://api.groq.com/openai/v1/chat/completions",
+        headers: (apiKey) => ({
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+        }),
+        formatRequest: (messages, maxTokens) => ({
+            model: "llama-3.3-70b-versatile",
+            messages: messages,
+            max_tokens: Math.min(maxTokens, 1000),
+            temperature: 0.05
+        }),
+        extractResponse: (data) => data.choices[0].message.content
     }
 };
 
