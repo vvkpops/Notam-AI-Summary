@@ -16,7 +16,8 @@ function App() {
         featureType: '',
         selectedProxy: 'corsproxy',
         customProxyUrl: 'http://localhost:3001',
-        aiModel: 'llama-3.1-70b-versatile',
+        // --- UPDATED MODEL ---
+        aiModel: 'llama3-70b-8192', 
     });
     
     const [loading, setLoading] = useState(false);

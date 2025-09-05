@@ -9,6 +9,13 @@ const formGridStyle = {
     marginBottom: '25px',
 };
 
+const sectionStyle = {
+    background: '#f1f3f4',
+    padding: '20px',
+    borderRadius: '8px',
+    marginTop: '20px',
+};
+
 const timeControlsStyle = {
     display: 'flex',
     alignItems: 'center',
@@ -42,6 +49,7 @@ const analyzeBtnStyle = {
     cursor: 'pointer',
     transition: 'all 0.3s ease',
     boxShadow: '0 5px 15px rgba(0,0,0,0.2)',
+    marginTop: '25px',
 };
 
 const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
@@ -81,7 +89,27 @@ const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
                 </div>
             </div>
             
-            {/* Additional filters can be added here in a similar fashion */}
+            <div style={sectionStyle}>
+                <div className="form-group">
+                    <label htmlFor="aiModel">AI Model</label>
+                    <select id="aiModel" name="aiModel" value={params.aiModel} onChange={handleChange}>
+                        <option value="llama3-70b-8192">Llama3 70B (Recommended)</option>
+                        <option value="llama3-8b-8192">Llama3 8B (Faster)</option>
+                        <option value="gemma-7b-it">Gemma 7B</option>
+                        <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style={sectionStyle}>
+                 <div className="form-group">
+                    <label htmlFor="selectedProxy">CORS Proxy</label>
+                    <select id="selectedProxy" name="selectedProxy" value={params.selectedProxy} onChange={handleChange}>
+                        <option value="corsproxy">CORS Proxy</option>
+                        <option value="allorigins">AllOrigins</option>
+                    </select>
+                </div>
+            </div>
 
             <button onClick={handleAnalyze} disabled={loading} style={analyzeBtnStyle}>
                 {loading ? 'Analyzing...' : '🚀 Analyze NOTAMs'}
