@@ -16,7 +16,8 @@ function App() {
         featureType: '',
         selectedProxy: 'corsproxy',
         customProxyUrl: 'http://localhost:3001',
-        aiModel: 'llama3-70b-8192', 
+        // --- UPDATED to a valid production model ---
+        aiModel: 'llama-3.1-8b-instant', 
     });
     
     const [loading, setLoading] = useState(false);
