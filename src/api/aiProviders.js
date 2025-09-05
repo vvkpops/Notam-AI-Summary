@@ -58,30 +58,6 @@ const AI_PROVIDERS = {
         extractResponse: (data) => data.content[0].text
     },
     
-    cohere: {
-        name: "Command R+",
-        maxTokens: 128000,
-        responseTokens: 4096,
-        apiUrl: "https://api.cohere.ai/v1/chat",
-        headers: (apiKey) => ({
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-        }),
-        formatRequest: (messages, maxTokens) => {
-            const systemMessage = messages.find(m => m.role === 'system');
-            const userMessage = messages.find(m => m.role === 'user');
-            
-            return {
-                model: "command-r-plus",
-                message: userMessage.content,
-                preamble: systemMessage?.content,
-                max_tokens: Math.min(maxTokens, 4096),
-                temperature: 0.05
-            };
-        },
-        extractResponse: (data) => data.text
-    },
-    
     openai: {
         name: "GPT-4o-mini",
         maxTokens: 128000,

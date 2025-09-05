@@ -6,28 +6,51 @@ function estimateTokens(text) {
     return Math.ceil(text.length / 4);
 }
 
-// **UPDATED: Gemini-first provider selection**
-function selectBestProvider(estimatedTokens) {
-    console.log(`🤖 Selecting AI provider for ~${estimatedTokens} tokens`);
+// **FIXED: Model name to provider mapping**
+function getProviderFromModel(aiModel) {
+    const modelProviderMap = {
+        'gemini-pro': 'gemini',
+        'gemini-1.5-pro': 'gemini',
+        'claude-3-5-sonnet': 'claude',
+        'gpt-4o-mini': 'openai',
+        'llama-3.3-70b-versatile': 'groq',
+        'llama-3.1-8b-instant': 'groq'
+    };
+    
+    return modelProviderMap[aiModel] || 'groq';
+}
+
+// **UPDATED: Gemini-first provider selection with model awareness**
+function selectBestProvider(estimatedTokens, requestedModel) {
+    console.log(`🤖 Selecting AI provider for ~${estimatedTokens} tokens, requested model: ${requestedModel}`);
+    
+    // **PRIORITY: Try to honor the requested model first**
+    const preferredProvider = getProviderFromModel(requestedModel);
     
     // **GEMINI FIRST: Priority order with Gemini as primary**
     const providers = [
         { name: 'gemini', available: !!GEMINI_API_KEY, limit: 1000000, cost: 0, priority: 1 },
         { name: 'claude', available: !!CLAUDE_API_KEY, limit: 200000, cost: 0, priority: 2 },
-        { name: 'cohere', available: !!COHERE_API_KEY, limit: 128000, cost: 0, priority: 3 },
-        { name: 'openai', available: !!OPENAI_API_KEY, limit: 128000, cost: 1, priority: 4 },
-        { name: 'groq', available: !!GROQ_API_KEY, limit: 6000, cost: 0, priority: 5 }
+        { name: 'openai', available: !!OPENAI_API_KEY, limit: 128000, cost: 1, priority: 3 },
+        { name: 'groq', available: !!GROQ_API_KEY, limit: 6000, cost: 0, priority: 4 }
     ];
     
-    // Find the best available provider that can handle the tokens
+    // First try the preferred provider if available
+    const preferred = providers.find(p => p.name === preferredProvider);
+    if (preferred && preferred.available && estimatedTokens <= preferred.limit) {
+        console.log(`✅ Selected preferred ${preferred.name} (limit: ${preferred.limit.toLocaleString()} tokens)`);
+        return preferred.name;
+    }
+    
+    // Fallback to best available provider
     for (const provider of providers) {
         if (provider.available && estimatedTokens <= provider.limit) {
-            console.log(`✅ Selected ${provider.name} (limit: ${provider.limit.toLocaleString()} tokens, priority: ${provider.priority})`);
+            console.log(`✅ Selected fallback ${provider.name} (limit: ${provider.limit.toLocaleString()} tokens, priority: ${provider.priority})`);
             return provider.name;
         }
     }
     
-    // Fallback to any available provider with truncation
+    // Last resort: any available provider with truncation
     const availableProvider = providers.find(p => p.available);
     if (availableProvider) {
         console.warn(`⚠️ Using ${availableProvider.name} with truncation`);
@@ -49,6 +72,7 @@ async function callAIProvider(provider, messages, maxResponseTokens, apiKey) {
     const body = config.formatRequest(messages, maxResponseTokens);
     
     console.log(`🚀 Calling ${config.name}...`);
+    console.log('📤 Request URL:', url);
     
     const response = await fetch(url, {
         method: 'POST',
@@ -74,6 +98,7 @@ export const generateAISummary = async ({
     timeUnit = 'hours'
 }) => {
     console.log('🎯 Starting AI summary generation with', notams.length, 'NOTAMs (Gemini Primary)');
+    console.log('🎯 Requested AI Model:', aiModel);
     
     // Create time window description
     const timeDescription = timeUnit === 'days' 
@@ -94,16 +119,21 @@ export const generateAISummary = async ({
         </div>`;
     }
 
-    // **ENHANCED: Prepare detailed NOTAM data for specific analysis**
-    const detailedNotamData = activeNotams.map((notam, index) => ({
-        id: index + 1,
-        number: notam.number || 'N/A',
-        text: (notam.summary || notam.rawText || '').substring(0, 600), // Increased for more detail
-        validFrom: notam.validFrom,
-        validTo: notam.validTo,
-        source: notam.source || 'FAA',
-        icao: notam.icao || icaoCode
-    }));
+    // **ENHANCED: Convert NOTAM data to the expected format**
+    const detailedNotamData = activeNotams.map((notam, index) => {
+        // Handle both old format (properties) and new format (direct fields)
+        const notamData = notam.properties || notam;
+        
+        return {
+            id: index + 1,
+            number: notamData.notamNumber || notamData.number || 'N/A',
+            text: (notamData.text || notamData.summary || notamData.rawText || '').substring(0, 600),
+            validFrom: notamData.effectiveStart || notamData.validFrom,
+            validTo: notamData.effectiveEnd || notamData.validTo,
+            source: notamData.source || 'FAA',
+            icao: notamData.icao || icaoCode
+        };
+    });
 
     // **ENHANCED: Detailed, specific prompt for technical precision**
     const systemPrompt = `You are an expert aviation operations analyst with deep knowledge of airport infrastructure, runway designations, taxiway systems, and navigation aids. You MUST provide extremely specific and detailed operational briefings that include exact runway numbers, taxiway identifiers, equipment designations, and precise operational impacts. Your analysis must be technically accurate and operationally actionable for professional pilots and dispatchers.`;
@@ -156,23 +186,27 @@ Analyze each NOTAM and extract specific operational details with exact identifie
         { role: 'user', content: userPrompt }
     ];
 
-    // **GEMINI PRIMARY: Auto-select with Gemini preference**
+    // **FIXED: Provider selection based on model + tokens**
     const estimatedTokens = estimateTokens(userPrompt);
-    const selectedProvider = selectBestProvider(estimatedTokens);
+    const selectedProvider = selectBestProvider(estimatedTokens, aiModel);
     
     const apiKeys = {
         gemini: GEMINI_API_KEY,
         claude: CLAUDE_API_KEY,
-        cohere: COHERE_API_KEY,
         openai: OPENAI_API_KEY,
         groq: GROQ_API_KEY
     };
+
+    // **CRITICAL: Check if API key is available**
+    if (!apiKeys[selectedProvider]) {
+        throw new Error(`No API key configured for ${selectedProvider}. Please add ${selectedProvider.toUpperCase()}_API_KEY to your environment variables.`);
+    }
 
     try {
         let rawContent;
         
         if (selectedProvider === 'groq') {
-            // Groq fallback with truncation
+            // **FIXED: Use proper Groq model name, not UI model name**
             let truncatedPrompt = userPrompt;
             if (estimatedTokens > 5000) {
                 console.warn('⚠️ Truncating for Groq limits');
@@ -186,12 +220,12 @@ Analyze each NOTAM and extract specific operational details with exact identifie
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    model: aiModel || "llama-3.3-70b-versatile",
+                    model: "llama-3.3-70b-versatile", // **FIXED: Always use Groq model name**
                     messages: [
                         { role: 'system', content: systemPrompt },
                         { role: 'user', content: truncatedPrompt }
                     ],
-                    temperature: 0.05, // Very low for precision
+                    temperature: 0.05,
                     max_tokens: 1000,
                     top_p: 0.8
                 })
@@ -209,7 +243,7 @@ Analyze each NOTAM and extract specific operational details with exact identifie
             rawContent = await callAIProvider(
                 selectedProvider, 
                 messages, 
-                2000, // Higher token limit for detailed responses
+                2000,
                 apiKeys[selectedProvider]
             );
         }
@@ -268,7 +302,7 @@ Analyze each NOTAM and extract specific operational details with exact identifie
         console.error(`${selectedProvider} API Error:`, error);
         
         // **ENHANCED: Smart fallback to next available provider**
-        const fallbackProviders = ['gemini', 'claude', 'cohere', 'openai', 'groq'].filter(p => p !== selectedProvider && apiKeys[p]);
+        const fallbackProviders = ['gemini', 'claude', 'openai', 'groq'].filter(p => p !== selectedProvider && apiKeys[p]);
         
         if (fallbackProviders.length > 0) {
             console.log(`🔄 Attempting fallback to ${fallbackProviders[0]}...`);

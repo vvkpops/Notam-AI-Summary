@@ -5,7 +5,10 @@ export const FAA_CLIENT_SECRET = process.env.VITE_FAA_CLIENT_SECRET || 'E3CeB511
 // AI Provider API Keys
 export const GROQ_API_KEY = process.env.VITE_GROQ_API_KEY || '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';
 export const CLAUDE_API_KEY = process.env.VITE_CLAUDE_API_KEY || '';
-export const GEMINI_API_KEY = process.env.VITE_GEMINI_API_KEY || '';
+
+// **ADD YOUR GEMINI API KEY HERE FOR TESTING**
+export const GEMINI_API_KEY = process.env.VITE_GEMINI_API_KEY || 'YOUR_GEMINI_API_KEY_HERE';
+
 export const OPENAI_API_KEY = process.env.VITE_OPENAI_API_KEY || '';
 export const COHERE_API_KEY = process.env.VITE_COHERE_API_KEY || '';
 

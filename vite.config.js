@@ -9,5 +9,8 @@ export default defineConfig({
     'process.env.VITE_FAA_CLIENT_ID': `"${process.env.VITE_FAA_CLIENT_ID}"`,
     'process.env.VITE_FAA_CLIENT_SECRET': `"${process.env.VITE_FAA_CLIENT_SECRET}"`,
     'process.env.VITE_GROQ_API_KEY': `"${process.env.VITE_GROQ_API_KEY}"`,
+    'process.env.VITE_GEMINI_API_KEY': `"${process.env.VITE_GEMINI_API_KEY}"`,
+    'process.env.VITE_CLAUDE_API_KEY': `"${process.env.VITE_CLAUDE_API_KEY}"`,
+    'process.env.VITE_OPENAI_API_KEY': `"${process.env.VITE_OPENAI_API_KEY}"`,
   },
 });
