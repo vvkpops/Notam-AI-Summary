@@ -20,12 +20,16 @@ export const generateAISummary = async ({
     const now = new Date();
     const endTime = new Date(now.getTime() + (timeUnit === 'days' ? timeValue * 24 : timeValue) * 60 * 60 * 1000);
 
-    // --- Using your parser to create a structured JSON payload ---
-    const structuredNotamData = limitedNotams.map((n) => {
+    // Enhanced structured NOTAM data with better parsing
+    const structuredNotamData = limitedNotams.map((n, index) => {
         const rawText = n.properties?.text || '';
         const parsed = parseRawNotam(rawText);
         
+        // Enhanced categorization
+        const categories = categorizeNotam(rawText, parsed);
+        
         return {
+            index: index + 1,
             notamNumber: parsed?.notamNumber || n.properties?.notamNumber || 'N/A',
             body: parsed?.body || rawText,
             validFrom: parsed?.validFromRaw || n.properties?.effectiveStart,
@@ -33,57 +37,101 @@ export const generateAISummary = async ({
             schedule: parsed?.schedule,
             isCancellation: parsed?.isCancellation,
             source: n.properties?.source || 'FAA',
-            isActiveInWindow: !n._timeFilterInfo || true // All filtered NOTAMs are active in window
+            isActiveInWindow: true,
+            qLine: parsed?.qLine,
+            aerodrome: parsed?.aerodrome,
+            // NEW: Enhanced categorization
+            category: categories.primary,
+            severity: categories.severity,
+            operationalImpact: categories.impact,
+            affectedSystems: categories.systems
         };
     }).filter(n => !n.isCancellation);
 
     const notamJsonString = JSON.stringify(structuredNotamData, null, 2);
     const truncatedNote = notams.length > maxNotams 
-        ? `\n\nNote: Analysis is based on the first ${maxNotams} of ${notams.length} total NOTAMs active in the specified time window.` 
+        ? `\n\n⚠️ **Analysis Limited:** Showing first ${maxNotams} of ${notams.length} total NOTAMs due to analysis constraints.` 
         : '';
 
-    // --- Enhanced time-aware prompt ---
-    const getAnalysisPrompt = () => {
-        const baseInstructions = `
-You are an expert aviation analyst providing a briefing for a professional pilot.
-Analyze the following JSON data of NOTAMs for ${icaoCode} that will be ACTIVE in the next ${timeDescription}.
+    // **WORLD'S BEST PROMPT** - Enhanced for operational excellence
+    const getEnhancedPrompt = () => {
+        const timeWindow = `${now.toISOString()} → ${endTime.toISOString()}`;
+        
+        const basePrompt = `
+🎯 **AVIATION OPERATIONAL BRIEFING REQUEST**
 
-**TIME WINDOW:** ${now.toISOString()} to ${endTime.toISOString()}
+**MISSION:** Provide a time-specific operational briefing for ${icaoCode}
+**TIME SCOPE:** Active NOTAMs in the next ${timeDescription} (${timeWindow})
+**AUDIENCE:** Professional pilots, dispatchers, and operations personnel
 
-**CRITICAL INSTRUCTIONS:**
-1. Focus ONLY on NOTAMs that affect operations in the next ${timeDescription}
-2. Provide a brief, bullet-pointed summary prioritizing operational significance
-3. Start with the most critical items (runway closures, ILS outages, etc.)
-4. Include effective times using "validFrom" and "validTo" fields
-5. If no significant operational impacts exist, state that clearly
-6. Use this format:
-   • **CRITICAL:** [Most important items first]
-   • **OPERATIONAL:** [Equipment outages, restrictions]
-   • **ADVISORY:** [Minor items, if space permits]
+**📋 ANALYSIS FRAMEWORK:**
+1. **CRITICALITY HIERARCHY:** 
+   - 🔴 CRITICAL: Runway closures, major navigation outages, safety-critical items
+   - 🟡 OPERATIONAL: Equipment outages, restrictions affecting normal ops
+   - 🟢 ADVISORY: Minor facilities, lighting, informational items
+
+2. **OPERATIONAL PRIORITIES:**
+   - Runway availability and restrictions
+   - ILS/GPS/Navigation aids status  
+   - Taxiway routing and ground movement
+   - Approach/departure procedures
+   - Airspace restrictions
+   - Airport facilities and services
+
+3. **TIME-SENSITIVE FOCUS:**
+   - Only include NOTAMs active during: ${timeWindow}
+   - Specify exact effective times for critical items
+   - Note any time-limited restrictions within the window
+
+**📊 REQUIRED OUTPUT FORMAT:**
+🔴 **CRITICAL OPERATIONS**
+• [Runway closures, major nav outages - with times]
+
+🟡 **OPERATIONAL IMPACTS** 
+• [Equipment outages, restrictions - with times]
+
+🟢 **ADVISORIES**
+• [Minor items, if operationally relevant]
+
+⏰ **TIME-SPECIFIC NOTES**
+• [Any scheduling within the ${timeDescription} window]
+
+**💼 PROFESSIONAL STANDARDS:**
+- Lead with operational impact, not NOTAM text
+- Use aviation terminology appropriately
+- Be concise but complete for operational decisions
+- If no significant impacts: clearly state "No critical operational impacts identified"
+- Maximum 4 items per category for briefing clarity
 `;
 
         const analysisSpecific = {
-            'runway': `
-**SPECIAL FOCUS:** Prioritize runway and taxiway operations, closures, and surface conditions.
-Look for: RWY closures, taxiway restrictions, construction, surface conditions, displaced thresholds.`,
-            'airspace': `
-**SPECIAL FOCUS:** Prioritize airspace restrictions, procedures, and navigation aids.
-Look for: TFRs, airspace closures, approach/departure restrictions, NAVAID outages.`,
-            'general': `
-**FOCUS:** Provide a balanced overview of all operationally significant NOTAMs.
-Prioritize by operational impact: runways → navigation → airspace → facilities.`
+            'runway': `\n🛬 **SPECIAL FOCUS: RUNWAY OPERATIONS**
+- Prioritize runway availability, surface conditions, construction
+- Detail taxiway impacts on ground movement
+- Note any displaced thresholds or approach restrictions`,
+            
+            'airspace': `\n🌐 **SPECIAL FOCUS: AIRSPACE & NAVIGATION**
+- Prioritize ILS/GPS/NAVAID status for approaches
+- Detail any airspace restrictions or TFRs
+- Note frequency changes or procedure modifications`,
+            
+            'general': `\n📋 **COMPREHENSIVE OPERATIONAL OVERVIEW**
+- Balance all operational aspects by impact severity
+- Runway → Navigation → Airspace → Facilities priority
+- Focus on flight planning and operational decision support`
         };
 
-        return baseInstructions + (analysisSpecific[analysisType] || analysisSpecific.general);
+        return basePrompt + (analysisSpecific[analysisType] || analysisSpecific.general);
     };
 
-    const prompt = `${getAnalysisPrompt()}
+    const enhancedPrompt = `${getEnhancedPrompt()}
 
-**Structured NOTAM Data:**
+**🔍 STRUCTURED NOTAM DATA FOR ANALYSIS:**
 ${notamJsonString}
 ${truncatedNote}
 
-**OPERATIONAL BRIEFING for ${icaoCode} (Next ${timeDescription}):**
+**📋 DELIVER OPERATIONAL BRIEFING FOR ${icaoCode}:**
+Analyze the above NOTAMs and provide your professional operational assessment for the next ${timeDescription}:
 `;
 
     try {
@@ -98,15 +146,17 @@ ${truncatedNote}
                 messages: [
                     {
                         role: 'system',
-                        content: `You are an expert aviation analyst creating time-specific, actionable NOTAM summaries for pilots and dispatchers. Focus on operational impacts within the specified time window.`
+                        content: `You are an expert aviation operations analyst with 20+ years of experience in flight operations, dispatch, and airport operations. Your role is to provide precise, time-specific operational briefings that help aviation professionals make informed decisions. You understand the operational significance of different NOTAM types and can prioritize information by real-world impact on flight operations.`
                     },
                     {
                         role: 'user', 
-                        content: prompt
+                        content: enhancedPrompt
                     }
                 ],
-                temperature: 0.1, // Lower temperature for more consistent, factual responses
-                max_tokens: 1200  // Increased for detailed time-specific analysis
+                temperature: 0.1, // Consistent, factual responses
+                max_tokens: 1500, // Adequate for detailed analysis
+                top_p: 0.9,
+                frequency_penalty: 0.1
             })
         });
 
@@ -116,13 +166,72 @@ ${truncatedNote}
         }
 
         const data = await response.json();
-        return data.choices[0].message.content
+        const rawContent = data.choices[0].message.content;
+        
+        // Enhanced formatting with better visual hierarchy
+        return rawContent
             .replace(/\n/g, '<br>')
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-            .replace(/• /g, '• '); // Ensure bullet points are preserved
+            .replace(/🔴/g, '<span style="color: #e74c3c; font-weight: bold;">🔴</span>')
+            .replace(/🟡/g, '<span style="color: #f39c12; font-weight: bold;">🟡</span>')
+            .replace(/🟢/g, '<span style="color: #27ae60; font-weight: bold;">🟢</span>')
+            .replace(/⏰/g, '<span style="color: #3498db; font-weight: bold;">⏰</span>')
+            .replace(/📋/g, '<span style="color: #8e44ad; font-weight: bold;">📋</span>')
+            .replace(/• /g, '• ');
         
     } catch (error) {
         console.error('Groq API Error:', error);
         throw new Error(`Failed to generate AI summary: ${error.message}`);
     }
 };
+
+// **NEW: Enhanced NOTAM categorization function**
+function categorizeNotam(rawText, parsed) {
+    const text = rawText.toUpperCase();
+    const body = (parsed?.body || rawText).toUpperCase();
+    
+    // Primary category detection
+    let primary = 'ADVISORY';
+    let severity = 'LOW';
+    let impact = 'MINIMAL';
+    let systems = [];
+    
+    // Runway operations (CRITICAL)
+    if (/RWY.*CLSD|RUNWAY.*CLOSED|RWY.*OUT.*SERVICE/i.test(text)) {
+        primary = 'RUNWAY_CLOSURE';
+        severity = 'CRITICAL';
+        impact = 'HIGH';
+        systems.push('RUNWAY');
+    }
+    
+    // Navigation aids (OPERATIONAL/CRITICAL)
+    if (/ILS.*U\/S|GPS.*U\/S|LOCALIZER.*U\/S|GLIDESLOPE.*U\/S/i.test(text)) {
+        primary = 'NAVIGATION';
+        severity = /ILS/i.test(text) ? 'CRITICAL' : 'OPERATIONAL';
+        impact = 'HIGH';
+        systems.push('ILS', 'NAVIGATION');
+    }
+    
+    // Taxiway restrictions (OPERATIONAL)
+    if (/TWY.*CLSD|TAXIWAY.*CLOSED/i.test(text)) {
+        primary = 'TAXIWAY';
+        severity = 'OPERATIONAL';
+        impact = 'MEDIUM';
+        systems.push('GROUND_MOVEMENT');
+    }
+    
+    // Airspace (OPERATIONAL/CRITICAL)
+    if (/AIRSPACE.*RESTRICTED|TFR|TEMPORARY.*FLIGHT.*RESTRICTION/i.test(text)) {
+        primary = 'AIRSPACE';
+        severity = 'OPERATIONAL';
+        impact = 'MEDIUM';
+        systems.push('AIRSPACE');
+    }
+    
+    return {
+        primary,
+        severity,
+        impact,
+        systems
+    };
+}
