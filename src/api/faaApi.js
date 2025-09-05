@@ -87,7 +87,7 @@ export const isNotamActiveInWindow = (notam, timeWindow) => {
 };
 
 /**
- * ENHANCED NOTAM fetch with bulletproof ICAO handling and improved error handling
+ * ENHANCED NOTAM fetch with bulletproof ICAO handling and 50 NOTAM limit
  */
 export const fetchNotams = async ({ 
     icaoCode, 
@@ -108,10 +108,11 @@ export const fetchNotams = async ({
     console.log(`🕐 Time window: ${timeWindow.start.toISOString()} to ${timeWindow.end.toISOString()} (${timeWindow.hours}h)`);
 
     // --- 1. PRIMARY SOURCE: ALWAYS try FAA first for ALL ICAO codes ---
+    // **OPTIMIZED: Request exactly 50 NOTAMs for performance**
     const faaParams = new URLSearchParams({
         responseFormat: 'geoJson',
-        icaoLocation: normalizedIcao, // **FIXED: Use normalized uppercase ICAO**
-        pageSize: 1000,
+        icaoLocation: normalizedIcao,
+        pageSize: 50, // **FIXED: Limit to 50 NOTAMs max**
         pageNum: 1,
         sortBy: 'effectiveStartDate',
         sortOrder: 'Asc'
@@ -136,7 +137,7 @@ export const fetchNotams = async ({
         }
     };
 
-    console.log(`📡 Fetching NOTAMs from FAA for ${normalizedIcao}:`, proxyUrl);
+    console.log(`📡 Fetching max 50 NOTAMs from FAA for ${normalizedIcao}:`, proxyUrl);
     
     let faaItems = [];
     let faaError = null;
@@ -156,7 +157,14 @@ export const fetchNotams = async ({
         }
         
         faaItems = faaData.items || [];
-        console.log(`✅ FAA returned ${faaItems.length} NOTAMs for ${normalizedIcao}`);
+        
+        // **SAFETY: Ensure we never exceed 50 NOTAMs**
+        if (faaItems.length > 50) {
+            console.warn(`⚠️ API returned ${faaItems.length} NOTAMs, limiting to 50 for performance`);
+            faaItems = faaItems.slice(0, 50);
+        }
+        
+        console.log(`✅ FAA returned ${faaItems.length} NOTAMs for ${normalizedIcao} (max 50 limit enforced)`);
         
     } catch (error) {
         faaError = error;
@@ -168,7 +176,7 @@ export const fetchNotams = async ({
         console.log(`🔄 FAA returned zero NOTAMs for ${normalizedIcao}. Attempting NAV CANADA fallback...`);
         
         try {
-            const navCanadaUrl = `https://plan.navcanada.ca/weather/api/alpha/?site=${normalizedIcao}&alpha=notam`; // **FIXED: Use normalized ICAO**
+            const navCanadaUrl = `https://plan.navcanada.ca/weather/api/alpha/?site=${normalizedIcao}&alpha=notam`;
             proxyUrl = proxyConfig.url + encodeURIComponent(navCanadaUrl);
             fetchOptions = { method: 'GET', headers: { 'Accept': 'application/json' } };
 
@@ -188,10 +196,13 @@ export const fetchNotams = async ({
             }
 
             const navNotams = navData?.data || [];
-            console.log(`✅ NAV CANADA returned ${navNotams.length} NOTAMs for ${normalizedIcao}`);
             
-            if (navNotams.length > 0) {
-                faaItems = navNotams.map(parseCanadianNotam);
+            // **SAFETY: Limit NAV CANADA results to 50 as well**
+            const limitedNavNotams = navNotams.slice(0, 50);
+            console.log(`✅ NAV CANADA returned ${navNotams.length} NOTAMs, using ${limitedNavNotams.length} (max 50 limit enforced)`);
+            
+            if (limitedNavNotams.length > 0) {
+                faaItems = limitedNavNotams.map(parseCanadianNotam);
                 console.log(`🔄 Using NAV CANADA data as fallback for ${normalizedIcao}`);
             } else {
                 console.log(`ℹ️ NAV CANADA also returned zero NOTAMs for ${normalizedIcao}`);
@@ -212,7 +223,7 @@ export const fetchNotams = async ({
         throw faaError;
     }
 
-    console.log(`📊 Total NOTAMs retrieved for ${normalizedIcao}: ${faaItems.length} (Source: ${faaItems[0]?.properties?.source || 'FAA'})`);
+    console.log(`📊 Total NOTAMs retrieved for ${normalizedIcao}: ${faaItems.length}/50 max (Source: ${faaItems[0]?.properties?.source || 'FAA'})`);
 
     // --- 3. Apply time filtering if enabled ---
     if (enableTimeFiltering && faaItems.length > 0) {
@@ -224,7 +235,7 @@ export const fetchNotams = async ({
             return isActive;
         });
         
-        console.log(`🎯 Time filtering: ${faaItems.length} → ${filteredItems.length} NOTAMs (${timeWindow.hours}h window)`);
+        console.log(`🎯 Time filtering: ${faaItems.length} → ${filteredItems.length} NOTAMs (${timeWindow.hours}h window, 50 max)`);
         
         // Add debug info to each NOTAM
         filteredItems.forEach(notam => {
