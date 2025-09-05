@@ -16,7 +16,6 @@ function App() {
         featureType: '',
         selectedProxy: 'corsproxy',
         customProxyUrl: 'http://localhost:3001',
-        // --- UPDATED MODEL ---
         aiModel: 'llama3-70b-8192', 
     });
     
@@ -33,9 +32,14 @@ function App() {
         setResult(null);
 
         try {
+            // The date/time parameters are no longer needed for the API call
             const notams = await fetchNotams({
-                ...params,
-                hours: params.timeUnit === 'days' ? params.timeValue * 24 : params.timeValue,
+                icaoCode: params.icaoCode,
+                notamType: params.notamType,
+                classification: params.classification,
+                featureType: params.featureType,
+                selectedProxy: params.selectedProxy,
+                customProxyUrl: params.customProxyUrl,
             });
 
             if (notams.length === 0) {
