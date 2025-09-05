@@ -29,17 +29,14 @@ export const generateAISummary = async ({
         </div>`;
     }
 
-    // **SIMPLIFIED: Send NOTAMs as-is - they're already perfectly structured**
-    const notamJsonString = JSON.stringify(activeNotams, null, 2);
-    
     // Check size and truncate if needed
     const sizeLimit = 80000; // 80KB
     let finalNotamData = activeNotams;
     
-    if (notamJsonString.length > sizeLimit) {
+    if (JSON.stringify(activeNotams).length > sizeLimit) {
         console.warn(`⚠️ Payload too large, reducing NOTAMs from ${activeNotams.length} to fit size limit`);
-        const targetCount = Math.floor(activeNotams.length * (sizeLimit / notamJsonString.length));
-        finalNotamData = activeNotams.slice(0, Math.max(targetCount, 5)); // Keep at least 5
+        const targetCount = Math.floor(activeNotams.length * (sizeLimit / JSON.stringify(activeNotams).length));
+        finalNotamData = activeNotams.slice(0, Math.max(targetCount, 5));
     }
 
     const finalNotamJson = JSON.stringify(finalNotamData, null, 2);
@@ -48,64 +45,86 @@ export const generateAISummary = async ({
     const finalSize = new Blob([finalNotamJson]).size;
     console.log(`📊 Final NOTAM JSON size: ${(finalSize / 1024).toFixed(2)}KB`);
 
-    // **WORLD'S BEST PROMPT** - Let the AI do what it does best
-    const getPrompt = () => {
+    // **FOOLPROOF PROMPT WITH BUILT-IN VERIFICATION**
+    const getFoolproofPrompt = () => {
         const timeWindow = `${now.toISOString()} → ${endTime.toISOString()}`;
         
         const basePrompt = `
-🎯 **AVIATION OPERATIONAL BRIEFING**
+🎯 **MISSION: AVIATION OPERATIONAL BRIEFING**
 
-**AIRPORT:** ${icaoCode}
-**TIME WINDOW:** Next ${timeDescription} (${timeWindow})
-**AUDIENCE:** Professional pilots, dispatchers, and operations personnel
+**TARGET:** ${icaoCode} Airport
+**TIMEFRAME:** Next ${timeDescription} (${timeWindow})
+**OUTPUT:** Bullet-point operational briefing for pilots and dispatchers
 
-**YOUR MISSION:**
-Analyze the NOTAMs below and provide a professional operational briefing. Focus on what matters most for flight operations.
+**MANDATORY REQUIREMENTS:**
+1. ✅ BULLET POINTS ONLY - No paragraphs, no fluff
+2. ✅ OPERATIONAL IMPACT FIRST - What it means for operations
+3. ✅ INCLUDE TIMES - When restrictions are active
+4. ✅ AVIATION TERMINOLOGY - Professional language only
+5. ✅ PRIORITIZE BY SEVERITY - Critical → Operational → Advisory
 
-**OUTPUT FORMAT:**
+**STRICT OUTPUT FORMAT:**
 🔴 **CRITICAL OPERATIONS**
-• [Runway closures, major navigation outages - include times]
+• [Bullet point with operational impact + time]
+• [Maximum 4 items]
 
-🟡 **OPERATIONAL IMPACTS** 
-• [Equipment outages, restrictions - include times]
+🟡 **OPERATIONAL IMPACTS**
+• [Bullet point with operational impact + time]
+• [Maximum 4 items]
 
 🟢 **ADVISORIES**
-• [Minor items that may affect operations]
+• [Bullet point with operational impact + time]
+• [Maximum 3 items]
 
-⏰ **TIME-SPECIFIC NOTES**
-• [Any scheduling or time-limited items]
+**VERIFICATION CHECKLIST - YOU MUST VERIFY:**
+✅ Each bullet point starts with OPERATIONAL IMPACT (not NOTAM jargon)
+✅ Times are included for critical items
+✅ No duplicate information
+✅ Aviation terminology is correct
+✅ Information is accurate to the NOTAM data
+✅ Bullet points are concise (max 15 words each)
+✅ No unnecessary words or filler
+✅ Categories are correctly prioritized by operational severity
 
-**GUIDELINES:**
-- Lead with operational impact, not NOTAM jargon
-- Use clear aviation terminology
-- Include effective times for important items
-- If no significant impacts: state "No critical operational impacts identified"
-- Be concise but complete for operational decisions
+**WHAT TO AVOID:**
+❌ Long sentences or paragraphs
+❌ Repeating NOTAM text verbatim
+❌ Non-aviation jargon
+❌ Duplicate information
+❌ Vague statements without operational context
+❌ Missing time information for critical items
+❌ More than 11 total bullet points
 `;
 
         const analysisSpecific = {
-            'runway': '\n🛬 **FOCUS:** Prioritize runway and taxiway operations, closures, construction impacts',
-            'airspace': '\n🌐 **FOCUS:** Prioritize navigation aids, airspace restrictions, approach limitations', 
-            'general': '\n📋 **FOCUS:** Comprehensive overview - runways → navigation → airspace → facilities'
+            'runway': `\n**SPECIAL FOCUS:** Runway closures, taxiway restrictions, construction impacts on aircraft movement`,
+            'airspace': `\n**SPECIAL FOCUS:** Navigation aids, airspace restrictions, approach/departure limitations`, 
+            'general': `\n**SPECIAL FOCUS:** All operational impacts ranked by severity: runways → navigation → airspace → facilities`
         };
 
         return basePrompt + (analysisSpecific[analysisType] || analysisSpecific.general);
     };
 
-    const enhancedPrompt = `${getPrompt()}
+    const foolproofPrompt = `${getFoolproofPrompt()}
 
 **NOTAM DATA TO ANALYZE:**
 ${finalNotamJson}
 
-**OPERATIONAL BRIEFING FOR ${icaoCode}:**
-Provide your professional assessment for the next ${timeDescription}:
+**INSTRUCTIONS:**
+1. Analyze the NOTAMs above
+2. Extract operational impacts (not NOTAM text)
+3. Create bullet points with times
+4. Self-verify against checklist
+5. Deliver verified briefing
+
+**DELIVER OPERATIONAL BRIEFING FOR ${icaoCode}:**
 `;
 
     // Log prompt details
-    const promptSize = new Blob([enhancedPrompt]).size;
-    const estimatedTokens = Math.ceil(enhancedPrompt.length / 4);
+    const promptSize = new Blob([foolproofPrompt]).size;
+    const estimatedTokens = Math.ceil(foolproofPrompt.length / 4);
     
-    console.log(`📏 PROMPT STATS: ${enhancedPrompt.length} chars, ${(promptSize / 1024).toFixed(2)}KB, ~${estimatedTokens} tokens`);
+    console.log(`📏 PROMPT STATS: ${foolproofPrompt.length} chars, ${(promptSize / 1024).toFixed(2)}KB, ~${estimatedTokens} tokens`);
 
     try {
         const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -119,17 +138,18 @@ Provide your professional assessment for the next ${timeDescription}:
                 messages: [
                     {
                         role: 'system',
-                        content: `You are an expert aviation operations analyst with 20+ years of experience. Provide precise, time-specific operational briefings that help aviation professionals make informed decisions. Focus on real operational impacts, not just repeating NOTAM text.`
+                        content: `You are an expert aviation operations analyst. You MUST follow the exact format specified. You MUST verify your output against the checklist provided. You MUST use bullet points only. You MUST include operational impacts and times. You MUST be concise and professional. If you provide anything other than the requested format, you have failed the mission.`
                     },
                     {
                         role: 'user', 
-                        content: enhancedPrompt
+                        content: foolproofPrompt
                     }
                 ],
-                temperature: 0.1,
-                max_tokens: 1500,
-                top_p: 0.9,
-                frequency_penalty: 0.1
+                temperature: 0.05, // Lower for more consistent format adherence
+                max_tokens: 1200,  // Reduced to enforce conciseness
+                top_p: 0.8,        // More focused responses
+                frequency_penalty: 0.2, // Reduce repetition
+                presence_penalty: 0.1   // Encourage variety
             })
         });
 
@@ -139,17 +159,50 @@ Provide your professional assessment for the next ${timeDescription}:
         }
 
         const data = await response.json();
-        const rawContent = data.choices[0].message.content;
+        let rawContent = data.choices[0].message.content;
         
-        // Enhanced formatting
-        return rawContent
+        // **POST-PROCESSING VERIFICATION AND CLEANUP**
+        
+        // Remove any text before the first emoji category
+        const firstEmojiMatch = rawContent.match(/(🔴|🟡|🟢)/);
+        if (firstEmojiMatch) {
+            rawContent = rawContent.substring(rawContent.indexOf(firstEmojiMatch[0]));
+        }
+        
+        // Ensure bullet points are properly formatted
+        rawContent = rawContent
+            .replace(/^-\s/gm, '• ')       // Convert dashes to bullets
+            .replace(/^\*\s/gm, '• ')      // Convert asterisks to bullets
+            .replace(/^(\d+\.)\s/gm, '• ') // Convert numbers to bullets
+            .replace(/\n\n+/g, '\n')       // Remove excessive line breaks
+            .trim();
+        
+        // Verify the output contains required sections
+        const hasRequired = rawContent.includes('🔴') || rawContent.includes('🟡') || rawContent.includes('🟢');
+        
+        if (!hasRequired) {
+            console.warn('⚠️ AI response missing required format, applying fallback');
+            return `<div style="padding: 20px;">
+                <h3 style="color: #f39c12;">⚠️ Analysis Incomplete</h3>
+                <p><strong>Raw AI Response:</strong></p>
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px;">
+                    ${rawContent.replace(/\n/g, '<br>')}
+                </div>
+                <p style="margin-top: 15px;"><em>Note: AI response did not follow the required format. Please review NOTAMs manually.</em></p>
+            </div>`;
+        }
+        
+        // Enhanced formatting with strict bullet point preservation
+        const formattedContent = rawContent
             .replace(/\n/g, '<br>')
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-            .replace(/🔴/g, '<span style="color: #e74c3c; font-weight: bold;">🔴</span>')
-            .replace(/🟡/g, '<span style="color: #f39c12; font-weight: bold;">🟡</span>')
-            .replace(/🟢/g, '<span style="color: #27ae60; font-weight: bold;">🟢</span>')
-            .replace(/⏰/g, '<span style="color: #3498db; font-weight: bold;">⏰</span>')
-            .replace(/• /g, '• ');
+            .replace(/🔴/g, '<span style="color: #e74c3c; font-weight: bold; font-size: 1.1em;">🔴</span>')
+            .replace(/🟡/g, '<span style="color: #f39c12; font-weight: bold; font-size: 1.1em;">🟡</span>')
+            .replace(/🟢/g, '<span style="color: #27ae60; font-weight: bold; font-size: 1.1em;">🟢</span>')
+            .replace(/• /g, '<span style="margin-left: 10px;">• </span>');
+        
+        console.log('✅ AI summary generated and verified');
+        return formattedContent;
         
     } catch (error) {
         console.error('Groq API Error:', error);
