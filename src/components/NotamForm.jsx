@@ -6,7 +6,7 @@ const sectionStyle = { background: '#f1f3f4', padding: '20px', borderRadius: '8p
 const timeControlsStyle = { display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' };
 const timeInputStyle = { width: '80px', textAlign: 'center', fontSize: '1rem', fontWeight: '600' };
 const timeUnitStyle = (isActive) => ({ padding: '8px 15px', background: isActive ? '#4ECDC4' : '#e9ecef', color: isActive ? 'white' : 'inherit', border: `2px solid ${isActive ? '#4ECDC4' : '#e1e8ed'}`, borderRadius: '6px', cursor: 'pointer', transition: 'all 0.3s ease', fontWeight: '500' });
-const analyzeBtnStyle = { background: 'linear-gradient(45deg, #FF6B6B, #4ECDC4)', color: 'white', border: 'none', padding: '15px 40px', fontSize: '1.1rem', fontWeight: '600', borderRadius: '50px', cursor: 'pointer', transition: 'all 0.3s ease', boxShadow: '0 5px 15px rgba(0,0,0,0.2)', marginTop: '25px' };
+const analyzeBtnStyle = { background: 'linear-gradient(45deg, #4285f4, #34a853)', color: 'white', border: 'none', padding: '15px 40px', fontSize: '1.1rem', fontWeight: '600', borderRadius: '50px', cursor: 'pointer', transition: 'all 0.3s ease', boxShadow: '0 5px 15px rgba(66, 133, 244, 0.3)', marginTop: '25px' };
 
 const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
     const [icaoValidation, setIcaoValidation] = useState({ isValid: true, message: '' });
@@ -17,7 +17,7 @@ const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
     };
 
     const handleIcaoChange = (e) => {
-        const value = e.target.value.toUpperCase(); // **FORCE UPPERCASE**
+        const value = e.target.value.toUpperCase();
         setParams(prev => ({ ...prev, icaoCode: value }));
         
         // Real-time validation
@@ -125,7 +125,7 @@ const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
                                 style={{
                                     padding: '4px 8px',
                                     fontSize: '0.75rem',
-                                    background: params.icaoCode === airport.code ? '#4ECDC4' : '#e9ecef',
+                                    background: params.icaoCode === airport.code ? '#4285f4' : '#e9ecef',
                                     color: params.icaoCode === airport.code ? 'white' : '#666',
                                     border: '1px solid #ccc',
                                     borderRadius: '3px',
@@ -141,7 +141,7 @@ const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
                 </div>
                 
                 <div className="form-group">
-                    <label>Time Window: <strong style={{color: '#4ECDC4'}}>{getTimeDescription()}</strong></label>
+                    <label>Time Window: <strong style={{color: '#4285f4'}}>{getTimeDescription()}</strong></label>
                     <div style={timeControlsStyle}>
                         <input 
                             type="number" 
@@ -177,7 +177,7 @@ const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
                                     cursor: 'pointer',
                                     transition: 'all 0.2s ease'
                                 }}
-                                onMouseOver={(e) => e.target.style.background = '#4ECDC4'}
+                                onMouseOver={(e) => e.target.style.background = '#4285f4'}
                                 onMouseOut={(e) => e.target.style.background = '#e9ecef'}
                             >
                                 {preset.label}
@@ -189,9 +189,9 @@ const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
                 <div className="form-group">
                     <label htmlFor="analysisType">Analysis Focus</label>
                     <select id="analysisType" name="analysisType" value={params.analysisType} onChange={handleChange}>
-                        <option value="general">General Summary</option>
-                        <option value="runway">Runway Operations</option>
-                        <option value="airspace">Airspace Restrictions</option>
+                        <option value="general">Comprehensive Analysis</option>
+                        <option value="runway">Runway Operations Detail</option>
+                        <option value="airspace">Airspace & Navigation Detail</option>
                     </select>
                 </div>
             </div>
@@ -199,10 +199,16 @@ const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
             <div style={sectionStyle}>
                 <div style={formGridStyle}>
                     <div className="form-group">
-                        <label htmlFor="aiModel">AI Model</label>
+                        <label htmlFor="aiModel">
+                            AI Provider 
+                            <span style={{ color: '#4285f4', fontSize: '0.85rem', marginLeft: '8px' }}>
+                                ✨ Gemini Primary
+                            </span>
+                        </label>
                         <select id="aiModel" name="aiModel" value={params.aiModel} onChange={handleChange}>
+                            <option value="gemini-pro">Google Gemini Pro (Recommended)</option>
+                            <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Fallback)</option>
                             <option value="llama-3.1-8b-instant">Llama 3.1 8B (Fast)</option>
-                            <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Recommended)</option>
                         </select>
                     </div>
                     
@@ -213,6 +219,16 @@ const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
                             <option value="allorigins">AllOrigins</option>
                         </select>
                     </div>
+                </div>
+                
+                <div style={{ background: '#e8f0fe', padding: '12px', borderRadius: '6px', marginTop: '15px', fontSize: '0.9rem' }}>
+                    <strong>🎯 Technical Analysis Features:</strong>
+                    <ul style={{ marginTop: '8px', paddingLeft: '20px' }}>
+                        <li>Specific runway numbers (e.g., RWY 04L/22R)</li>
+                        <li>Exact taxiway identifiers (e.g., TWY A, TWY BRAVO)</li>
+                        <li>Navigation aid designations (e.g., ILS RWY 31L)</li>
+                        <li>Precise operational impacts and times</li>
+                    </ul>
                 </div>
             </div>
 
@@ -225,7 +241,7 @@ const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
                     cursor: loading || !isFormValid ? 'not-allowed' : 'pointer'
                 }}
             >
-                {loading ? '🔍 Analyzing...' : `🚀 Analyze NOTAMs (${getTimeDescription()})`}
+                {loading ? '🔍 Analyzing...' : `🚀 Detailed Analysis (${getTimeDescription()})`}
             </button>
         </>
     );
