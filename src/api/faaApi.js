@@ -1,21 +1,31 @@
 import { FAA_CLIENT_ID, FAA_CLIENT_SECRET, PROXY_CONFIGS } from '../config';
 
+// Helper function to format date as YYYY-MM-DD
+const toYyyyMmDd = (date) => {
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
 export const fetchNotams = async ({ icaoCode, hours, notamType, classification, featureType, selectedProxy, customProxyUrl }) => {
     try {
         const now = new Date();
-        const endDate = new Date(now.getTime() + hours * 60 * 60 * 1000);
+        // The FAA API appears to prefer a simple YYYY-MM-DD format.
+        const startDate = toYyyyMmDd(now);
         
         const params = new URLSearchParams({
             responseFormat: 'geoJson',
             icaoLocation: icaoCode,
-            effectiveStartDate: now.toISOString(),
-            effectiveEndDate: endDate.toISOString(),
+            // Using simplified date format
+            effectiveStartDate: startDate,
             pageSize: 1000,
             pageNum: 1,
             sortBy: 'effectiveStartDate',
             sortOrder: 'Asc'
         });
 
+        // Add optional filters
         if (notamType) params.append('notamType', notamType);
         if (classification) params.append('classification', classification);
         if (featureType) params.append('featureType', featureType);
@@ -63,6 +73,11 @@ export const fetchNotams = async ({ icaoCode, hours, notamType, classification, 
             data = JSON.parse(proxyResponse.contents);
         } else {
             data = await response.json();
+        }
+
+        // --- Improved Error Handling for FAA API ---
+        if (data.error) {
+            throw new Error(`FAA API Error (${data.status || 'N/A'}): ${data.error} - ${data.message || 'No message.'}`);
         }
 
         console.log('FAA API Response via proxy:', data);
