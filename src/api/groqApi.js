@@ -1,23 +1,47 @@
 import { GROQ_API_KEY } from '../config';
+import { parseRawNotam } from '../utils/parser'; // <-- Importing your parser
 
 export const generateAISummary = async ({ notams, icaoCode, analysisType, aiModel }) => {
     const maxNotams = 50;
     const limitedNotams = notams.slice(0, maxNotams);
-    const truncatedNote = notams.length > maxNotams ? `\n\nNote: Analysis limited to first ${maxNotams} NOTAMs out of ${notams.length} total.` : '';
 
-    const prompt = `You are an expert aviation analyst. Analyze the following NOTAMs for ${icaoCode} airport and provide a clear, actionable summary focusing on ${analysisType} aspects.
+    // --- Using your parser to create a structured JSON payload ---
+    const structuredNotamData = limitedNotams.map((n) => {
+        const rawText = n.properties?.text || '';
+        const parsed = parseRawNotam(rawText);
+        
+        // Return a clean, structured object for the AI
+        return {
+            notamNumber: parsed?.notamNumber || n.properties?.notamNumber || 'N/A',
+            body: parsed?.body || rawText, // The most important part for the summary
+            validFrom: parsed?.validFromRaw,
+            validTo: parsed?.validToRaw,
+            schedule: parsed?.schedule,
+            isCancellation: parsed?.isCancellation,
+        };
+    }).filter(n => !n.isCancellation); // Filter out cancellation NOTAMs from the summary
 
-NOTAMs to analyze (${limitedNotams.length} total):
-${limitedNotams.map((n, i) => `${i + 1}. ${n.properties?.text || 'No text available'} (Effective: ${n.properties?.effectiveStart || 'Unknown'} to ${n.properties?.effectiveEnd || 'Unknown'}, Type: ${n.properties?.featureType || 'Unknown'})`).join('\n')}${truncatedNote}
+    const notamJsonString = JSON.stringify(structuredNotamData, null, 2);
+    const truncatedNote = notams.length > maxNotams ? `\n\nNote: Analysis is based on the first ${maxNotams} of ${notams.length} total NOTAMs.` : '';
 
-Please provide:
-1. **Executive Summary**: A brief 2-3 sentence overview of the most critical impacts
-2. **Operational Impact**: Key impacts for pilots and flight operations
-3. **Safety Considerations**: Any critical safety items that require attention
-4. **Timeline**: When restrictions are active and their durations
-5. **Flight Planning Recommendations**: Specific actions pilots should take
+    // --- A refined prompt that leverages the structured data ---
+    const prompt = `
+You are an expert aviation analyst providing a briefing for a professional pilot.
+Analyze the following JSON data of NOTAMs for ${icaoCode}.
 
-Format your response in clear, professional language suitable for aviation professionals. Use bullet points and clear sections for easy scanning. Focus on actionable insights rather than just repeating the NOTAM text.`;
+**Instructions:**
+1.  Provide a brief, to-the-point, bulleted summary.
+2.  Focus ONLY on operationally significant information from the "body" of each NOTAM.
+3.  Look for runway/taxiway closures, equipment outages (e.g., ILS, VOR, PAPI), airspace restrictions, and critical obstacles.
+4.  For each point, mention the effective times using the "validFrom" and "validTo" fields.
+5.  If there are no significant operational impacts, state that clearly.
+
+**Structured NOTAM Data:**
+${notamJsonString}
+${truncatedNote}
+
+**Briefing Summary for ${icaoCode}:**
+`;
 
     try {
         const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -29,11 +53,17 @@ Format your response in clear, professional language suitable for aviation profe
             body: JSON.stringify({
                 model: aiModel,
                 messages: [
-                    { role: 'system', content: 'You are an expert aviation analyst specializing in NOTAM analysis and flight safety. You provide clear, actionable insights for pilots and flight operations personnel.' },
-                    { role: 'user', content: prompt }
+                    {
+                        role: 'system',
+                        content: 'You are an expert aviation analyst creating concise, actionable summaries for pilots from structured JSON NOTAM data.'
+                    },
+                    {
+                        role: 'user', 
+                        content: prompt
+                    }
                 ],
-                temperature: 0.3,
-                max_tokens: 2000
+                temperature: 0.2,
+                max_tokens: 1000
             })
         });
 

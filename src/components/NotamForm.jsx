@@ -1,56 +1,14 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 
-// Inline styles for components
-const formGridStyle = {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-    gap: '20px',
-    marginBottom: '25px',
-};
+// (Styles remain the same)
+const formGridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px', marginBottom: '25px' };
+const sectionStyle = { background: '#f1f3f4', padding: '20px', borderRadius: '8px', marginTop: '20px' };
+const timeControlsStyle = { display: 'flex', alignItems: 'center', gap: '15px' };
+const timeInputStyle = { width: '80px', textAlign: 'center' };
+const timeUnitStyle = (isActive) => ({ padding: '8px 15px', background: isActive ? '#4ECDC4' : '#e9ecef', color: isActive ? 'white' : 'inherit', border: `2px solid ${isActive ? '#4ECDC4' : '#e1e8ed'}`, borderRadius: '6px', cursor: 'pointer', transition: 'all 0.3s ease', fontWeight: '500' });
+const analyzeBtnStyle = { background: 'linear-gradient(45deg, #FF6B6B, #4ECDC4)', color: 'white', border: 'none', padding: '15px 40px', fontSize: '1.1rem', fontWeight: '600', borderRadius: '50px', cursor: 'pointer', transition: 'all 0.3s ease', boxShadow: '0 5px 15px rgba(0,0,0,0.2)', marginTop: '25px' };
 
-const sectionStyle = {
-    background: '#f1f3f4',
-    padding: '20px',
-    borderRadius: '8px',
-    marginTop: '20px',
-};
-
-const timeControlsStyle = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '15px',
-};
-
-const timeInputStyle = {
-    width: '80px',
-    textAlign: 'center',
-};
-
-const timeUnitStyle = (isActive) => ({
-    padding: '8px 15px',
-    background: isActive ? '#4ECDC4' : '#e9ecef',
-    color: isActive ? 'white' : 'inherit',
-    border: `2px solid ${isActive ? '#4ECDC4' : '#e1e8ed'}`,
-    borderRadius: '6px',
-    cursor: 'pointer',
-    transition: 'all 0.3s ease',
-    fontWeight: '500',
-});
-
-const analyzeBtnStyle = {
-    background: 'linear-gradient(45deg, #FF6B6B, #4ECDC4)',
-    color: 'white',
-    border: 'none',
-    padding: '15px 40px',
-    fontSize: '1.1rem',
-    fontWeight: '600',
-    borderRadius: '50px',
-    cursor: 'pointer',
-    transition: 'all 0.3s ease',
-    boxShadow: '0 5px 15px rgba(0,0,0,0.2)',
-    marginTop: '25px',
-};
 
 const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
     const handleChange = (e) => {
@@ -93,6 +51,7 @@ const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
                 <div className="form-group">
                     <label htmlFor="aiModel">AI Model</label>
                     <select id="aiModel" name="aiModel" value={params.aiModel} onChange={handleChange}>
+                        {/* --- UPDATED MODEL LIST --- */}
                         <option value="llama-3.1-8b-instant">Llama 3.1 8B (Fast)</option>
                         <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Recommended)</option>
                     </select>
