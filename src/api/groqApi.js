@@ -8,7 +8,7 @@ export const generateAISummary = async ({
     timeValue = 24,
     timeUnit = 'hours'
 }) => {
-    console.log('🎯 Starting AI summary generation with', notams.length, 'NOTAMs');
+    console.log('🎯 Starting AI summary generation with', notams.length, 'NOTAMs (max 50)');
     
     // Create time window description
     const timeDescription = timeUnit === 'days' 
@@ -29,23 +29,24 @@ export const generateAISummary = async ({
         </div>`;
     }
 
-    // Check size and truncate if needed
-    const sizeLimit = 80000; // 80KB
+    // **OPTIMIZED: Already limited to 50, but ensure we don't exceed safe payload sizes**
+    const sizeLimit = 70000; // 70KB - more conservative for 50 NOTAMs
     let finalNotamData = activeNotams;
     
-    if (JSON.stringify(activeNotams).length > sizeLimit) {
-        console.warn(`⚠️ Payload too large, reducing NOTAMs from ${activeNotams.length} to fit size limit`);
-        const targetCount = Math.floor(activeNotams.length * (sizeLimit / JSON.stringify(activeNotams).length));
-        finalNotamData = activeNotams.slice(0, Math.max(targetCount, 5));
+    const jsonString = JSON.stringify(activeNotams);
+    if (jsonString.length > sizeLimit) {
+        console.warn(`⚠️ Payload still too large with ${activeNotams.length} NOTAMs, reducing further`);
+        const targetCount = Math.floor(activeNotams.length * (sizeLimit / jsonString.length));
+        finalNotamData = activeNotams.slice(0, Math.max(targetCount, 10)); // Keep at least 10
     }
 
     const finalNotamJson = JSON.stringify(finalNotamData, null, 2);
     
     // Log final size
     const finalSize = new Blob([finalNotamJson]).size;
-    console.log(`📊 Final NOTAM JSON size: ${(finalSize / 1024).toFixed(2)}KB`);
+    console.log(`📊 Final NOTAM JSON size: ${(finalSize / 1024).toFixed(2)}KB for ${finalNotamData.length} NOTAMs`);
 
-    // **FOOLPROOF PROMPT WITH BUILT-IN VERIFICATION**
+    // **ENHANCED PROMPT - Optimized for 50 NOTAM maximum**
     const getFoolproofPrompt = () => {
         const timeWindow = `${now.toISOString()} → ${endTime.toISOString()}`;
         
@@ -54,6 +55,7 @@ export const generateAISummary = async ({
 
 **TARGET:** ${icaoCode} Airport
 **TIMEFRAME:** Next ${timeDescription} (${timeWindow})
+**DATA:** ${finalNotamData.length} NOTAMs (max 50 for optimal analysis)
 **OUTPUT:** Bullet-point operational briefing for pilots and dispatchers
 
 **MANDATORY REQUIREMENTS:**
@@ -76,24 +78,22 @@ export const generateAISummary = async ({
 • [Bullet point with operational impact + time]
 • [Maximum 3 items]
 
-**VERIFICATION CHECKLIST - YOU MUST VERIFY:**
-✅ Each bullet point starts with OPERATIONAL IMPACT (not NOTAM jargon)
-✅ Times are included for critical items
+**QUALITY CONTROL - VERIFY BEFORE RESPONDING:**
+✅ Each bullet starts with OPERATIONAL IMPACT (not NOTAM jargon)
+✅ Times included for critical/operational items
 ✅ No duplicate information
 ✅ Aviation terminology is correct
-✅ Information is accurate to the NOTAM data
+✅ Information matches the NOTAM data
 ✅ Bullet points are concise (max 15 words each)
 ✅ No unnecessary words or filler
-✅ Categories are correctly prioritized by operational severity
+✅ Categories correctly prioritized by operational severity
+✅ Total bullet points ≤ 11
 
-**WHAT TO AVOID:**
-❌ Long sentences or paragraphs
-❌ Repeating NOTAM text verbatim
-❌ Non-aviation jargon
-❌ Duplicate information
-❌ Vague statements without operational context
-❌ Missing time information for critical items
-❌ More than 11 total bullet points
+**ANALYSIS OPTIMIZATION:**
+- Focus on the MOST OPERATIONALLY SIGNIFICANT NOTAMs
+- With 50 NOTAMs max, prioritize by real impact on flight operations
+- Skip minor administrative or low-impact NOTAMs
+- Emphasize runway, navigation, and airspace impacts
 `;
 
         const analysisSpecific = {
@@ -107,15 +107,15 @@ export const generateAISummary = async ({
 
     const foolproofPrompt = `${getFoolproofPrompt()}
 
-**NOTAM DATA TO ANALYZE:**
+**NOTAM DATA TO ANALYZE (${finalNotamData.length}/50 max):**
 ${finalNotamJson}
 
 **INSTRUCTIONS:**
-1. Analyze the NOTAMs above
-2. Extract operational impacts (not NOTAM text)
-3. Create bullet points with times
-4. Self-verify against checklist
-5. Deliver verified briefing
+1. Analyze the ${finalNotamData.length} NOTAMs above
+2. Extract ONLY the most operationally significant impacts
+3. Create bullet points with times for critical items
+4. Self-verify against quality control checklist
+5. Deliver verified operational briefing
 
 **DELIVER OPERATIONAL BRIEFING FOR ${icaoCode}:**
 `;
@@ -138,7 +138,7 @@ ${finalNotamJson}
                 messages: [
                     {
                         role: 'system',
-                        content: `You are an expert aviation operations analyst. You MUST follow the exact format specified. You MUST verify your output against the checklist provided. You MUST use bullet points only. You MUST include operational impacts and times. You MUST be concise and professional. If you provide anything other than the requested format, you have failed the mission.`
+                        content: `You are an expert aviation operations analyst. You MUST follow the exact format specified. You MUST verify your output against the quality control checklist. You MUST use bullet points only. You MUST include operational impacts and times. You MUST be concise and professional. Focus on the MOST OPERATIONALLY SIGNIFICANT items from the NOTAMs provided. With a 50 NOTAM limit, prioritize by real operational impact.`
                     },
                     {
                         role: 'user', 
@@ -201,7 +201,7 @@ ${finalNotamJson}
             .replace(/🟢/g, '<span style="color: #27ae60; font-weight: bold; font-size: 1.1em;">🟢</span>')
             .replace(/• /g, '<span style="margin-left: 10px;">• </span>');
         
-        console.log('✅ AI summary generated and verified');
+        console.log(`✅ AI summary generated and verified for ${finalNotamData.length} NOTAMs`);
         return formattedContent;
         
     } catch (error) {
