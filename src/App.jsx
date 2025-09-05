@@ -16,8 +16,8 @@ function App() {
         featureType: '',
         selectedProxy: 'corsproxy',
         customProxyUrl: 'http://localhost:3001',
-        // --- UPDATED to a valid production model ---
-        aiModel: 'llama-3.1-8b-instant', 
+        aiModel: 'llama-3.3-70b-versatile', // Better model for analysis
+        enableTimeFiltering: true // NEW: Time filtering toggle
     });
     
     const [loading, setLoading] = useState(false);
@@ -29,11 +29,19 @@ function App() {
             return;
         }
 
+        // Validate time inputs
+        if (params.timeValue < 1 || params.timeValue > 168) {
+            alert('Time value must be between 1 and 168 hours (7 days).');
+            return;
+        }
+
         setLoading(true);
         setResult(null);
 
         try {
-            // The date/time parameters are no longer needed for the API call
+            console.log(`🚀 Starting analysis for ${params.icaoCode} - Next ${params.timeValue} ${params.timeUnit}`);
+            
+            // Pass time filtering parameters to the API
             const notams = await fetchNotams({
                 icaoCode: params.icaoCode,
                 notamType: params.notamType,
@@ -41,24 +49,51 @@ function App() {
                 featureType: params.featureType,
                 selectedProxy: params.selectedProxy,
                 customProxyUrl: params.customProxyUrl,
+                timeValue: params.timeValue,
+                timeUnit: params.timeUnit,
+                enableTimeFiltering: params.enableTimeFiltering
             });
 
             if (notams.length === 0) {
-                setResult({ notams: [], summary: '', error: null, successMessage: '' });
+                const timeDesc = params.timeUnit === 'days' ? `${params.timeValue} day(s)` : `${params.timeValue} hour(s)`;
+                setResult({ 
+                    notams: [], 
+                    summary: `<strong>No NOTAMs found for ${params.icaoCode} in the next ${timeDesc}</strong><br><br>All clear for operations in the specified time window.`, 
+                    error: null, 
+                    successMessage: `✅ Analysis complete - No active NOTAMs found for the next ${timeDesc}.`,
+                    timeWindow: { timeValue: params.timeValue, timeUnit: params.timeUnit }
+                });
                 return;
             }
 
-            const summary = await generateAISummary({ notams, ...params });
+            // Pass time parameters to AI summary generation
+            const summary = await generateAISummary({ 
+                notams, 
+                icaoCode: params.icaoCode,
+                analysisType: params.analysisType,
+                aiModel: params.aiModel,
+                timeValue: params.timeValue,
+                timeUnit: params.timeUnit
+            });
 
+            const timeDesc = params.timeUnit === 'days' ? `${params.timeValue} day(s)` : `${params.timeValue} hour(s)`;
             setResult({
                 notams,
                 summary,
                 error: null,
-                successMessage: `✅ Success! Analyzed ${notams.length} NOTAMs using ${params.aiModel}.`
+                successMessage: `✅ Success! Analyzed ${notams.length} NOTAMs for the next ${timeDesc} using ${params.aiModel}.`,
+                timeWindow: { timeValue: params.timeValue, timeUnit: params.timeUnit }
             });
 
         } catch (error) {
-            setResult({ notams: [], summary: '', error, successMessage: '' });
+            console.error('Analysis error:', error);
+            setResult({ 
+                notams: [], 
+                summary: '', 
+                error, 
+                successMessage: '',
+                timeWindow: { timeValue: params.timeValue, timeUnit: params.timeUnit }
+            });
         } finally {
             setLoading(false);
         }
@@ -74,7 +109,11 @@ function App() {
                     handleAnalyze={handleAnalyze} 
                     loading={loading}
                 />
-                {loading && <div className="loading">Analyzing NOTAMs</div>}
+                {loading && (
+                    <div className="loading">
+                        🔍 Analyzing NOTAMs for the next {params.timeValue} {params.timeUnit}...
+                    </div>
+                )}
                 {result && <Results result={result} />}
             </main>
         </div>

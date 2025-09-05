@@ -2,14 +2,10 @@ import { FAA_CLIENT_ID, FAA_CLIENT_SECRET, PROXY_CONFIGS } from '../config';
 
 /**
  * Parses a NOTAM from the NAV CANADA API into a format consistent with the FAA API.
- * This ensures the rest of the application can handle the data uniformly.
- * @param {object} notam - The raw NOTAM object from the NAV CANADA API.
- * @returns {object} A formatted NOTAM object.
  */
 function parseCanadianNotam(notam) {
     let rawText = 'Full NOTAM text not available from source.';
     try {
-        // NAV CANADA nests the raw NOTAM inside a JSON string in the 'text' field.
         if (typeof notam.text === 'string') {
             const parsedText = JSON.parse(notam.text);
             rawText = parsedText.raw?.replace(/\\n/g, '\n') || notam.text;
@@ -19,20 +15,69 @@ function parseCanadianNotam(notam) {
         if (typeof notam.text === 'string') rawText = notam.text;
     }
 
-    // Create a structure that mimics the FAA's GeoJSON format for consistency.
     return {
         properties: {
             notamNumber: notam.notam_id || 'N/A',
             text: rawText,
             effectiveStart: notam.startValidity,
             effectiveEnd: notam.endValidity,
-            source: 'NAV CANADA' // Add source for clarity
+            source: 'NAV CANADA'
         }
     };
 }
 
+/**
+ * NEW: Time filtering utility functions
+ */
+export const createTimeWindow = (timeValue, timeUnit) => {
+    const now = new Date();
+    const hours = timeUnit === 'days' ? timeValue * 24 : timeValue;
+    const endTime = new Date(now.getTime() + (hours * 60 * 60 * 1000));
+    
+    return {
+        start: now,
+        end: endTime,
+        hours: hours
+    };
+};
 
-export const fetchNotams = async ({ icaoCode, notamType, classification, featureType, selectedProxy, customProxyUrl }) => {
+export const isNotamActiveInWindow = (notam, timeWindow) => {
+    const props = notam.properties;
+    if (!props) return false;
+
+    // Parse NOTAM dates
+    const notamStart = props.effectiveStart ? new Date(props.effectiveStart) : null;
+    const notamEnd = props.effectiveEnd ? new Date(props.effectiveEnd) : null;
+
+    // Handle permanent NOTAMs
+    if (!notamEnd || props.effectiveEnd === 'PERM' || props.effectiveEnd === 'PERMANENT') {
+        // If NOTAM starts before our window ends, it's active
+        return !notamStart || notamStart <= timeWindow.end;
+    }
+
+    // Check if NOTAM overlaps with our time window
+    // NOTAM is active if: notam_start <= window_end AND notam_end >= window_start
+    const isActive = (!notamStart || notamStart <= timeWindow.end) && 
+                    (notamEnd >= timeWindow.start);
+
+    return isActive;
+};
+
+export const fetchNotams = async ({ 
+    icaoCode, 
+    notamType, 
+    classification, 
+    featureType, 
+    selectedProxy, 
+    customProxyUrl,
+    timeValue = 24,
+    timeUnit = 'hours',
+    enableTimeFiltering = true 
+}) => {
+    // Create time window for filtering
+    const timeWindow = createTimeWindow(timeValue, timeUnit);
+    console.log(`🕐 Time window: ${timeWindow.start.toISOString()} to ${timeWindow.end.toISOString()} (${timeWindow.hours}h)`);
+
     // --- 1. PRIMARY SOURCE: Always try FAA first ---
     const faaParams = new URLSearchParams({
         responseFormat: 'geoJson',
@@ -74,7 +119,6 @@ export const fetchNotams = async ({ icaoCode, notamType, classification, feature
         
         const navCanadaUrl = `https://plan.navcanada.ca/weather/api/alpha/?site=${icaoCode}&alpha=notam`;
         proxyUrl = proxyConfig.url + encodeURIComponent(navCanadaUrl);
-        // NAV CANADA doesn't require API keys, so we use simpler headers.
         fetchOptions = { method: 'GET', headers: { 'Accept': 'application/json' } };
 
         console.log('Fetching from NAV CANADA via proxy:', proxyUrl);
@@ -94,16 +138,32 @@ export const fetchNotams = async ({ icaoCode, notamType, classification, feature
 
         const navNotams = navData?.data || [];
         console.log(`✅ Found ${navNotams.length} NOTAMs from NAV CANADA for ${icaoCode}`);
-
-        // Parse and return the Canadian NOTAMs in a consistent format
-        return navNotams.map(parseCanadianNotam);
+        faaItems = navNotams.map(parseCanadianNotam);
     }
 
-    // --- 3. If not Canadian or FAA returned results, return FAA data ---
     if (faaData.error) {
         throw new Error(`FAA API Error (${faaData.status || 'N/A'}): ${faaData.error} - ${faaData.message || 'No message.'}`);
     }
 
-    console.log(`✅ Found ${faaItems.length} NOTAMs from FAA for ${icaoCode}`);
+    console.log(`✅ Found ${faaItems.length} total NOTAMs from ${faaItems[0]?.properties?.source || 'FAA'} for ${icaoCode}`);
+
+    // --- 3. NEW: Apply time filtering if enabled ---
+    if (enableTimeFiltering) {
+        const filteredItems = faaItems.filter(notam => isNotamActiveInWindow(notam, timeWindow));
+        console.log(`🎯 Time filtering: ${faaItems.length} → ${filteredItems.length} NOTAMs (${timeWindow.hours}h window)`);
+        
+        // Add debug info to each NOTAM
+        filteredItems.forEach(notam => {
+            notam._timeFilterInfo = {
+                windowStart: timeWindow.start.toISOString(),
+                windowEnd: timeWindow.end.toISOString(),
+                notamStart: notam.properties?.effectiveStart,
+                notamEnd: notam.properties?.effectiveEnd
+            };
+        });
+        
+        return filteredItems;
+    }
+
     return faaItems;
 };
