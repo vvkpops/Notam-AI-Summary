@@ -1,5 +1,68 @@
 import { GROQ_API_KEY } from '../config';
 
+// **ENHANCED: Smart token estimation and management**
+function estimateTokens(text) {
+    // More accurate estimation: ~4 characters per token for English
+    return Math.ceil(text.length / 4);
+}
+
+function truncateToTokenLimit(text, maxTokens) {
+    const maxChars = maxTokens * 4; // Conservative estimate
+    if (text.length <= maxChars) return text;
+    
+    // Find good truncation point
+    const truncated = text.substring(0, maxChars);
+    const lastPeriod = truncated.lastIndexOf('.');
+    const lastNewline = truncated.lastIndexOf('\n');
+    const lastSpace = truncated.lastIndexOf(' ');
+    
+    // Use best available break point
+    const breakPoint = lastPeriod > maxChars * 0.8 ? lastPeriod + 1 :
+                      lastNewline > maxChars * 0.8 ? lastNewline :
+                      lastSpace > maxChars * 0.8 ? lastSpace : maxChars;
+    
+    return truncated.substring(0, breakPoint) + '\n\n[TRUNCATED FOR SIZE LIMIT]';
+}
+
+function smartNotamReduction(notams, targetTokens) {
+    console.log(`🎯 Smart reduction: ${notams.length} NOTAMs, target: ${targetTokens} tokens`);
+    
+    // Step 1: Remove cancellation NOTAMs
+    let filtered = notams.filter(notam => !notam.isCancellation);
+    console.log(`📊 After removing cancellations: ${filtered.length} NOTAMs`);
+    
+    // Step 2: Prioritize by operational impact
+    const prioritized = filtered.sort((a, b) => {
+        const getPriority = (notam) => {
+            const text = (notam.summary || notam.rawText || '').toUpperCase();
+            
+            // Critical (priority 1)
+            if (/RWY.*CLSD|RUNWAY.*CLOSED|ILS.*U\/S/.test(text)) return 1;
+            
+            // Operational (priority 2)  
+            if (/TWY.*CLSD|TAXIWAY.*CLOSED|NAV.*U\/S|APPROACH.*RESTRICTED/.test(text)) return 2;
+            
+            // Advisory (priority 3)
+            return 3;
+        };
+        
+        return getPriority(a) - getPriority(b);
+    });
+    
+    // Step 3: Progressively reduce until we fit
+    let currentTokens = estimateTokens(JSON.stringify(prioritized));
+    let result = [...prioritized];
+    
+    while (currentTokens > targetTokens && result.length > 5) {
+        // Remove lowest priority items first
+        result = result.slice(0, Math.floor(result.length * 0.8));
+        currentTokens = estimateTokens(JSON.stringify(result));
+        console.log(`📉 Reduced to ${result.length} NOTAMs, ~${currentTokens} tokens`);
+    }
+    
+    return result;
+}
+
 export const generateAISummary = async ({ 
     notams, 
     icaoCode, 
@@ -8,7 +71,7 @@ export const generateAISummary = async ({
     timeValue = 24,
     timeUnit = 'hours'
 }) => {
-    console.log('🎯 Starting AI summary generation with', notams.length, 'NOTAMs (max 50)');
+    console.log('🎯 Starting AI summary generation with', notams.length, 'NOTAMs');
     
     // Create time window description
     const timeDescription = timeUnit === 'days' 
@@ -18,10 +81,18 @@ export const generateAISummary = async ({
     const now = new Date();
     const endTime = new Date(now.getTime() + (timeUnit === 'days' ? timeValue * 24 : timeValue) * 60 * 60 * 1000);
 
-    // Filter out cancellation NOTAMs for analysis
-    const activeNotams = notams.filter(notam => !notam.isCancellation);
+    // **CRITICAL: Smart token budget management**
+    const maxTokensBudget = aiModel.includes('8b') ? 5000 : 12000; // Conservative limits
+    const promptOverhead = 1500; // Estimated tokens for instructions
+    const responseTokens = 800;   // Estimated tokens for response
+    const availableForNotams = maxTokensBudget - promptOverhead - responseTokens;
     
-    if (activeNotams.length === 0) {
+    console.log(`💰 Token budget: ${maxTokensBudget} total, ${availableForNotams} for NOTAMs`);
+
+    // **ENHANCED: Smart NOTAM reduction**
+    const optimizedNotams = smartNotamReduction(notams, availableForNotams);
+    
+    if (optimizedNotams.length === 0) {
         return `<div style="text-align: center; padding: 20px;">
             <h3 style="color: #27ae60;">✅ No Active NOTAMs</h3>
             <p>No active NOTAMs found for <strong>${icaoCode}</strong> in the next ${timeDescription}.</p>
@@ -29,102 +100,79 @@ export const generateAISummary = async ({
         </div>`;
     }
 
-    // **OPTIMIZED: Already limited to 50, but ensure we don't exceed safe payload sizes**
-    const sizeLimit = 70000; // 70KB - more conservative for 50 NOTAMs
-    let finalNotamData = activeNotams;
+    // **OPTIMIZED: Minimal but complete NOTAM data**
+    const compactNotamData = optimizedNotams.map((notam, index) => ({
+        id: index + 1,
+        number: notam.number || 'N/A',
+        text: (notam.summary || notam.rawText || '').substring(0, 300), // Limit text length
+        validFrom: notam.validFrom,
+        validTo: notam.validTo,
+        source: notam.source || 'FAA'
+    }));
+
+    const finalNotamJson = JSON.stringify(compactNotamData, null, 1); // Reduced formatting
     
-    const jsonString = JSON.stringify(activeNotams);
-    if (jsonString.length > sizeLimit) {
-        console.warn(`⚠️ Payload still too large with ${activeNotams.length} NOTAMs, reducing further`);
-        const targetCount = Math.floor(activeNotams.length * (sizeLimit / jsonString.length));
-        finalNotamData = activeNotams.slice(0, Math.max(targetCount, 10)); // Keep at least 10
+    // **CRITICAL: Final token check**
+    const notamTokens = estimateTokens(finalNotamJson);
+    console.log(`📊 Final NOTAM data: ${compactNotamData.length} NOTAMs, ~${notamTokens} tokens`);
+    
+    if (notamTokens > availableForNotams) {
+        console.warn('⚠️ Still too large, applying text truncation');
+        const truncatedJson = truncateToTokenLimit(finalNotamJson, availableForNotams);
+        var finalData = truncatedJson;
+    } else {
+        var finalData = finalNotamJson;
     }
 
-    const finalNotamJson = JSON.stringify(finalNotamData, null, 2);
-    
-    // Log final size
-    const finalSize = new Blob([finalNotamJson]).size;
-    console.log(`📊 Final NOTAM JSON size: ${(finalSize / 1024).toFixed(2)}KB for ${finalNotamData.length} NOTAMs`);
-
-    // **ENHANCED PROMPT - Optimized for 50 NOTAM maximum**
-    const getFoolproofPrompt = () => {
-        const timeWindow = `${now.toISOString()} → ${endTime.toISOString()}`;
-        
+    // **STREAMLINED: Concise but effective prompt**
+    const getCompactPrompt = () => {
         const basePrompt = `
-🎯 **MISSION: AVIATION OPERATIONAL BRIEFING**
+🎯 **AVIATION BRIEFING: ${icaoCode}**
+**PERIOD:** Next ${timeDescription}
+**DATA:** ${compactNotamData.length} NOTAMs (optimized for analysis)
 
-**TARGET:** ${icaoCode} Airport
-**TIMEFRAME:** Next ${timeDescription} (${timeWindow})
-**DATA:** ${finalNotamData.length} NOTAMs (max 50 for optimal analysis)
-**OUTPUT:** Bullet-point operational briefing for pilots and dispatchers
+**MISSION:** Create bullet-point operational briefing
 
-**MANDATORY REQUIREMENTS:**
-1. ✅ BULLET POINTS ONLY - No paragraphs, no fluff
-2. ✅ OPERATIONAL IMPACT FIRST - What it means for operations
-3. ✅ INCLUDE TIMES - When restrictions are active
-4. ✅ AVIATION TERMINOLOGY - Professional language only
-5. ✅ PRIORITIZE BY SEVERITY - Critical → Operational → Advisory
+**FORMAT:**
+🔴 **CRITICAL** (max 3 items)
+• [Impact + time]
 
-**STRICT OUTPUT FORMAT:**
-🔴 **CRITICAL OPERATIONS**
-• [Bullet point with operational impact + time]
-• [Maximum 4 items]
+🟡 **OPERATIONAL** (max 3 items)  
+• [Impact + time]
 
-🟡 **OPERATIONAL IMPACTS**
-• [Bullet point with operational impact + time]
-• [Maximum 4 items]
+🟢 **ADVISORY** (max 2 items)
+• [Impact + time]
 
-🟢 **ADVISORIES**
-• [Bullet point with operational impact + time]
-• [Maximum 3 items]
+**RULES:**
+- Start with operational impact, not NOTAM text
+- Include effective times for critical items
+- Max 12 words per bullet
+- Skip minor administrative items
+- Use aviation terminology`;
 
-**QUALITY CONTROL - VERIFY BEFORE RESPONDING:**
-✅ Each bullet starts with OPERATIONAL IMPACT (not NOTAM jargon)
-✅ Times included for critical/operational items
-✅ No duplicate information
-✅ Aviation terminology is correct
-✅ Information matches the NOTAM data
-✅ Bullet points are concise (max 15 words each)
-✅ No unnecessary words or filler
-✅ Categories correctly prioritized by operational severity
-✅ Total bullet points ≤ 11
-
-**ANALYSIS OPTIMIZATION:**
-- Focus on the MOST OPERATIONALLY SIGNIFICANT NOTAMs
-- With 50 NOTAMs max, prioritize by real impact on flight operations
-- Skip minor administrative or low-impact NOTAMs
-- Emphasize runway, navigation, and airspace impacts
-`;
-
-        const analysisSpecific = {
-            'runway': `\n**SPECIAL FOCUS:** Runway closures, taxiway restrictions, construction impacts on aircraft movement`,
-            'airspace': `\n**SPECIAL FOCUS:** Navigation aids, airspace restrictions, approach/departure limitations`, 
-            'general': `\n**SPECIAL FOCUS:** All operational impacts ranked by severity: runways → navigation → airspace → facilities`
+        const focusMap = {
+            'runway': '\n**FOCUS:** Runway/taxiway operations, construction',
+            'airspace': '\n**FOCUS:** Navigation aids, airspace restrictions', 
+            'general': '\n**FOCUS:** All operational impacts by severity'
         };
 
-        return basePrompt + (analysisSpecific[analysisType] || analysisSpecific.general);
+        return basePrompt + (focusMap[analysisType] || focusMap.general);
     };
 
-    const foolproofPrompt = `${getFoolproofPrompt()}
+    const compactPrompt = `${getCompactPrompt()}
 
-**NOTAM DATA TO ANALYZE (${finalNotamData.length}/50 max):**
-${finalNotamJson}
+**NOTAM DATA:**
+${finalData}
 
-**INSTRUCTIONS:**
-1. Analyze the ${finalNotamData.length} NOTAMs above
-2. Extract ONLY the most operationally significant impacts
-3. Create bullet points with times for critical items
-4. Self-verify against quality control checklist
-5. Deliver verified operational briefing
+**BRIEFING:**`;
 
-**DELIVER OPERATIONAL BRIEFING FOR ${icaoCode}:**
-`;
-
-    // Log prompt details
-    const promptSize = new Blob([foolproofPrompt]).size;
-    const estimatedTokens = Math.ceil(foolproofPrompt.length / 4);
+    // **FINAL: Token validation before sending**
+    const totalPromptTokens = estimateTokens(compactPrompt);
+    console.log(`📏 Final prompt: ${totalPromptTokens} tokens (limit: ${maxTokensBudget})`);
     
-    console.log(`📏 PROMPT STATS: ${foolproofPrompt.length} chars, ${(promptSize / 1024).toFixed(2)}KB, ~${estimatedTokens} tokens`);
+    if (totalPromptTokens > maxTokensBudget) {
+        throw new Error(`Prompt still too large: ${totalPromptTokens} tokens (limit: ${maxTokensBudget}). Try reducing time window or use fewer NOTAMs.`);
+    }
 
     try {
         const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -138,18 +186,18 @@ ${finalNotamJson}
                 messages: [
                     {
                         role: 'system',
-                        content: `You are an expert aviation operations analyst. You MUST follow the exact format specified. You MUST verify your output against the quality control checklist. You MUST use bullet points only. You MUST include operational impacts and times. You MUST be concise and professional. Focus on the MOST OPERATIONALLY SIGNIFICANT items from the NOTAMs provided. With a 50 NOTAM limit, prioritize by real operational impact.`
+                        content: `Expert aviation analyst. Follow exact format. Be concise. Focus on operational impact.`
                     },
                     {
                         role: 'user', 
-                        content: foolproofPrompt
+                        content: compactPrompt
                     }
                 ],
-                temperature: 0.05, // Lower for more consistent format adherence
-                max_tokens: 1200,  // Reduced to enforce conciseness
-                top_p: 0.8,        // More focused responses
-                frequency_penalty: 0.2, // Reduce repetition
-                presence_penalty: 0.1   // Encourage variety
+                temperature: 0.1,
+                max_tokens: responseTokens, // Conservative response limit
+                top_p: 0.8,
+                frequency_penalty: 0.3,
+                presence_penalty: 0.2
             })
         });
 
@@ -161,48 +209,48 @@ ${finalNotamJson}
         const data = await response.json();
         let rawContent = data.choices[0].message.content;
         
-        // **POST-PROCESSING VERIFICATION AND CLEANUP**
-        
-        // Remove any text before the first emoji category
+        // **ENHANCED: Format cleanup**
         const firstEmojiMatch = rawContent.match(/(🔴|🟡|🟢)/);
         if (firstEmojiMatch) {
             rawContent = rawContent.substring(rawContent.indexOf(firstEmojiMatch[0]));
         }
         
-        // Ensure bullet points are properly formatted
         rawContent = rawContent
-            .replace(/^-\s/gm, '• ')       // Convert dashes to bullets
-            .replace(/^\*\s/gm, '• ')      // Convert asterisks to bullets
-            .replace(/^(\d+\.)\s/gm, '• ') // Convert numbers to bullets
-            .replace(/\n\n+/g, '\n')       // Remove excessive line breaks
+            .replace(/^[-*]\s/gm, '• ')
+            .replace(/^(\d+\.)\s/gm, '• ')
+            .replace(/\n\n+/g, '\n')
             .trim();
         
-        // Verify the output contains required sections
         const hasRequired = rawContent.includes('🔴') || rawContent.includes('🟡') || rawContent.includes('🟢');
         
         if (!hasRequired) {
-            console.warn('⚠️ AI response missing required format, applying fallback');
             return `<div style="padding: 20px;">
-                <h3 style="color: #f39c12;">⚠️ Analysis Incomplete</h3>
-                <p><strong>Raw AI Response:</strong></p>
+                <h3 style="color: #f39c12;">⚠️ Analysis Simplified</h3>
+                <p>Due to size constraints, showing ${compactNotamData.length} of ${notams.length} NOTAMs.</p>
                 <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px;">
                     ${rawContent.replace(/\n/g, '<br>')}
                 </div>
-                <p style="margin-top: 15px;"><em>Note: AI response did not follow the required format. Please review NOTAMs manually.</em></p>
             </div>`;
         }
         
-        // Enhanced formatting with strict bullet point preservation
         const formattedContent = rawContent
             .replace(/\n/g, '<br>')
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-            .replace(/🔴/g, '<span style="color: #e74c3c; font-weight: bold; font-size: 1.1em;">🔴</span>')
-            .replace(/🟡/g, '<span style="color: #f39c12; font-weight: bold; font-size: 1.1em;">🟡</span>')
-            .replace(/🟢/g, '<span style="color: #27ae60; font-weight: bold; font-size: 1.1em;">🟢</span>')
+            .replace(/🔴/g, '<span style="color: #e74c3c; font-weight: bold;">🔴</span>')
+            .replace(/🟡/g, '<span style="color: #f39c12; font-weight: bold;">🟡</span>')
+            .replace(/🟢/g, '<span style="color: #27ae60; font-weight: bold;">🟢</span>')
             .replace(/• /g, '<span style="margin-left: 10px;">• </span>');
         
-        console.log(`✅ AI summary generated and verified for ${finalNotamData.length} NOTAMs`);
-        return formattedContent;
+        // Add optimization notice if NOTAMs were reduced
+        let optimizationNotice = '';
+        if (compactNotamData.length < notams.length) {
+            optimizationNotice = `<div style="background: #e3f2fd; padding: 10px; border-radius: 6px; margin-bottom: 15px; border-left: 3px solid #2196f3;">
+                <strong>📊 Analysis Optimized:</strong> Showing ${compactNotamData.length} most critical of ${notams.length} total NOTAMs for ${icaoCode}.
+            </div>`;
+        }
+        
+        console.log(`✅ AI summary generated: ${compactNotamData.length}/${notams.length} NOTAMs analyzed`);
+        return optimizationNotice + formattedContent;
         
     } catch (error) {
         console.error('Groq API Error:', error);
