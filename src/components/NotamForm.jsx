@@ -71,7 +71,7 @@ const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
                 </div>
                 
                 <div className="form-group">
-                    <label>Time Period</label>
+                    <label>Time Period (for reference)</label>
                     <div style={timeControlsStyle}>
                         <input type="number" name="timeValue" value={params.timeValue} onChange={handleChange} style={timeInputStyle} min="1" max="168" />
                         <div onClick={() => handleTimeUnitChange('hours')} style={timeUnitStyle(params.timeUnit === 'hours')}>Hours</div>
@@ -93,10 +93,8 @@ const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
                 <div className="form-group">
                     <label htmlFor="aiModel">AI Model</label>
                     <select id="aiModel" name="aiModel" value={params.aiModel} onChange={handleChange}>
-                        <option value="llama3-70b-8192">Llama3 70B (Recommended)</option>
-                        <option value="llama3-8b-8192">Llama3 8B (Faster)</option>
-                        <option value="gemma-7b-it">Gemma 7B</option>
-                        <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
+                        <option value="llama-3.1-8b-instant">Llama 3.1 8B (Fast)</option>
+                        <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Recommended)</option>
                     </select>
                 </div>
             </div>
