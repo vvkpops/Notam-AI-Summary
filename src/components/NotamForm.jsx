@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 
 const formGridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px', marginBottom: '25px' };
@@ -9,9 +9,31 @@ const timeUnitStyle = (isActive) => ({ padding: '8px 15px', background: isActive
 const analyzeBtnStyle = { background: 'linear-gradient(45deg, #FF6B6B, #4ECDC4)', color: 'white', border: 'none', padding: '15px 40px', fontSize: '1.1rem', fontWeight: '600', borderRadius: '50px', cursor: 'pointer', transition: 'all 0.3s ease', boxShadow: '0 5px 15px rgba(0,0,0,0.2)', marginTop: '25px' };
 
 const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
+    const [icaoValidation, setIcaoValidation] = useState({ isValid: true, message: '' });
+
     const handleChange = (e) => {
         const { name, value } = e.target;
         setParams(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleIcaoChange = (e) => {
+        const value = e.target.value.toUpperCase(); // **FORCE UPPERCASE**
+        setParams(prev => ({ ...prev, icaoCode: value }));
+        
+        // Real-time validation
+        if (value.length === 0) {
+            setIcaoValidation({ isValid: true, message: '' });
+        } else if (value.length < 4) {
+            setIcaoValidation({ isValid: false, message: `${4 - value.length} more character${4 - value.length > 1 ? 's' : ''} needed` });
+        } else if (value.length === 4) {
+            if (/^[A-Z0-9]{4}$/.test(value)) {
+                setIcaoValidation({ isValid: true, message: '✅ Valid ICAO format' });
+            } else {
+                setIcaoValidation({ isValid: false, message: 'Must be 4 alphanumeric characters only' });
+            }
+        } else {
+            setIcaoValidation({ isValid: false, message: 'Too long - ICAO codes are exactly 4 characters' });
+        }
     };
 
     const handleTimeUnitChange = (unit) => {
@@ -44,21 +66,78 @@ const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
         }
     };
 
+    // Popular airports for quick selection
+    const popularAirports = [
+        { code: 'KJFK', name: 'New York JFK' },
+        { code: 'KLAX', name: 'Los Angeles' },
+        { code: 'EGLL', name: 'London Heathrow' },
+        { code: 'CYYZ', name: 'Toronto Pearson' },
+        { code: 'CYUL', name: 'Montreal' },
+        { code: 'CYYT', name: 'St. Johns' },
+        { code: 'CYVR', name: 'Vancouver' }
+    ];
+
+    const isFormValid = icaoValidation.isValid && params.icaoCode.length === 4;
+
     return (
         <>
             <div style={formGridStyle}>
                 <div className="form-group">
-                    <label htmlFor="icaoCode">ICAO Airport Code</label>
+                    <label htmlFor="icaoCode">
+                        ICAO Airport Code
+                        {icaoValidation.message && (
+                            <span style={{ 
+                                marginLeft: '10px', 
+                                fontSize: '0.85rem',
+                                color: icaoValidation.isValid ? '#27ae60' : '#e74c3c',
+                                fontWeight: '500'
+                            }}>
+                                {icaoValidation.message}
+                            </span>
+                        )}
+                    </label>
                     <input 
                         type="text" 
                         id="icaoCode" 
                         name="icaoCode" 
                         value={params.icaoCode} 
-                        onChange={handleChange} 
+                        onChange={handleIcaoChange}
                         placeholder="e.g., KJFK" 
                         maxLength="4" 
-                        style={{ textTransform: 'uppercase', fontSize: '1.1rem', fontWeight: '600' }} 
+                        style={{ 
+                            textTransform: 'uppercase', 
+                            fontSize: '1.1rem', 
+                            fontWeight: '600',
+                            borderColor: icaoValidation.isValid ? '#e1e8ed' : '#e74c3c',
+                            boxShadow: icaoValidation.isValid ? 'none' : '0 0 0 2px rgba(231, 76, 60, 0.1)'
+                        }} 
                     />
+                    {/* Quick airport selection */}
+                    <div style={{ marginTop: '8px', display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+                        {popularAirports.map(airport => (
+                            <button
+                                key={airport.code}
+                                type="button"
+                                onClick={() => {
+                                    setParams(prev => ({ ...prev, icaoCode: airport.code }));
+                                    setIcaoValidation({ isValid: true, message: '✅ Valid ICAO format' });
+                                }}
+                                style={{
+                                    padding: '4px 8px',
+                                    fontSize: '0.75rem',
+                                    background: params.icaoCode === airport.code ? '#4ECDC4' : '#e9ecef',
+                                    color: params.icaoCode === airport.code ? 'white' : '#666',
+                                    border: '1px solid #ccc',
+                                    borderRadius: '3px',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s ease'
+                                }}
+                                title={airport.name}
+                            >
+                                {airport.code}
+                            </button>
+                        ))}
+                    </div>
                 </div>
                 
                 <div className="form-group">
@@ -139,11 +218,11 @@ const NotamForm = ({ params, setParams, handleAnalyze, loading }) => {
 
             <button 
                 onClick={handleAnalyze} 
-                disabled={loading || !params.icaoCode} 
+                disabled={loading || !isFormValid} 
                 style={{
                     ...analyzeBtnStyle,
-                    opacity: loading || !params.icaoCode ? 0.6 : 1,
-                    cursor: loading || !params.icaoCode ? 'not-allowed' : 'pointer'
+                    opacity: loading || !isFormValid ? 0.6 : 1,
+                    cursor: loading || !isFormValid ? 'not-allowed' : 'pointer'
                 }}
             >
                 {loading ? '🔍 Analyzing...' : `🚀 Analyze NOTAMs (${getTimeDescription()})`}

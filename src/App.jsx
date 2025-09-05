@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import Header from './components/Header';
 import ConfigSection from './components/ConfigSection';
 import Results from './components/Results';
-import { fetchNotams } from './api/faaApi';
+import { fetchNotams, validateAndNormalizeIcao } from './api/faaApi';
 import { generateAISummary } from './api/groqApi';
 
 function App() {
@@ -16,16 +16,25 @@ function App() {
         featureType: '',
         selectedProxy: 'corsproxy',
         customProxyUrl: 'http://localhost:3001',
-        aiModel: 'llama-3.3-70b-versatile', // Better model for analysis
-        enableTimeFiltering: true // NEW: Time filtering toggle
+        aiModel: 'llama-3.3-70b-versatile',
+        enableTimeFiltering: true
     });
     
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState(null);
 
     const handleAnalyze = async () => {
-        if (!params.icaoCode) {
+        if (!params.icaoCode || !params.icaoCode.trim()) {
             alert('Please enter a valid ICAO code.');
+            return;
+        }
+
+        // **ENHANCED VALIDATION: Validate ICAO format before proceeding**
+        try {
+            const normalizedIcao = validateAndNormalizeIcao(params.icaoCode);
+            console.log(`✅ ICAO validation passed: ${normalizedIcao}`);
+        } catch (error) {
+            alert(error.message);
             return;
         }
 
@@ -39,11 +48,12 @@ function App() {
         setResult(null);
 
         try {
-            console.log(`🚀 Starting analysis for ${params.icaoCode} - Next ${params.timeValue} ${params.timeUnit}`);
+            const timeDesc = params.timeUnit === 'days' ? `${params.timeValue} day(s)` : `${params.timeValue} hour(s)`;
+            console.log(`🚀 Starting analysis for ${params.icaoCode.toUpperCase()} - Next ${timeDesc}`);
             
-            // Pass time filtering parameters to the API
+            // Fetch NOTAMs with enhanced ICAO handling
             const notams = await fetchNotams({
-                icaoCode: params.icaoCode,
+                icaoCode: params.icaoCode, // Will be normalized inside fetchNotams
                 notamType: params.notamType,
                 classification: params.classification,
                 featureType: params.featureType,
@@ -54,35 +64,41 @@ function App() {
                 enableTimeFiltering: params.enableTimeFiltering
             });
 
+            const normalizedIcao = params.icaoCode.trim().toUpperCase();
+
             if (notams.length === 0) {
-                const timeDesc = params.timeUnit === 'days' ? `${params.timeValue} day(s)` : `${params.timeValue} hour(s)`;
                 setResult({ 
                     notams: [], 
-                    summary: `<strong>No NOTAMs found for ${params.icaoCode} in the next ${timeDesc}</strong><br><br>All clear for operations in the specified time window.`, 
+                    summary: `<div style="text-align: center; padding: 20px;">
+                        <h3 style="color: #27ae60;">✅ No Active NOTAMs</h3>
+                        <p>No NOTAMs found for <strong>${normalizedIcao}</strong> in the next ${timeDesc}.</p>
+                        <p style="color: #27ae60; font-weight: 600; margin-top: 15px;">All clear for operations! 🛫</p>
+                    </div>`, 
                     error: null, 
-                    successMessage: `✅ Analysis complete - No active NOTAMs found for the next ${timeDesc}.`,
-                    timeWindow: { timeValue: params.timeValue, timeUnit: params.timeUnit }
+                    successMessage: `✅ Analysis complete - No active NOTAMs found for ${normalizedIcao} in the next ${timeDesc}.`,
+                    timeWindow: { timeValue: params.timeValue, timeUnit: params.timeUnit },
+                    icaoCode: normalizedIcao
                 });
                 return;
             }
 
-            // Pass time parameters to AI summary generation
+            // Generate AI summary
             const summary = await generateAISummary({ 
                 notams, 
-                icaoCode: params.icaoCode,
+                icaoCode: normalizedIcao,
                 analysisType: params.analysisType,
                 aiModel: params.aiModel,
                 timeValue: params.timeValue,
                 timeUnit: params.timeUnit
             });
 
-            const timeDesc = params.timeUnit === 'days' ? `${params.timeValue} day(s)` : `${params.timeValue} hour(s)`;
             setResult({
                 notams,
                 summary,
                 error: null,
-                successMessage: `✅ Success! Analyzed ${notams.length} NOTAMs for the next ${timeDesc} using ${params.aiModel}.`,
-                timeWindow: { timeValue: params.timeValue, timeUnit: params.timeUnit }
+                successMessage: `✅ Successfully analyzed ${notams.length} NOTAMs for ${normalizedIcao} in the next ${timeDesc} using ${params.aiModel}.`,
+                timeWindow: { timeValue: params.timeValue, timeUnit: params.timeUnit },
+                icaoCode: normalizedIcao
             });
 
         } catch (error) {
@@ -92,7 +108,8 @@ function App() {
                 summary: '', 
                 error, 
                 successMessage: '',
-                timeWindow: { timeValue: params.timeValue, timeUnit: params.timeUnit }
+                timeWindow: { timeValue: params.timeValue, timeUnit: params.timeUnit },
+                icaoCode: params.icaoCode.trim().toUpperCase()
             });
         } finally {
             setLoading(false);
@@ -111,7 +128,12 @@ function App() {
                 />
                 {loading && (
                     <div className="loading">
-                        🔍 Analyzing NOTAMs for the next {params.timeValue} {params.timeUnit}...
+                        <div style={{ fontSize: '1.1rem', marginBottom: '10px' }}>
+                            🔍 Analyzing NOTAMs for {params.icaoCode.toUpperCase()}
+                        </div>
+                        <div style={{ fontSize: '0.9rem', opacity: '0.8' }}>
+                            Next {params.timeValue} {params.timeUnit} • {params.analysisType} analysis
+                        </div>
                     </div>
                 )}
                 {result && <Results result={result} />}

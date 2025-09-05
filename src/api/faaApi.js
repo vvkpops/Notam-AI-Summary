@@ -27,7 +27,27 @@ function parseCanadianNotam(notam) {
 }
 
 /**
- * NEW: Time filtering utility functions
+ * Enhanced ICAO code validation and normalization
+ */
+export const validateAndNormalizeIcao = (icaoCode) => {
+    if (!icaoCode || typeof icaoCode !== 'string') {
+        throw new Error('ICAO code is required');
+    }
+
+    // Remove whitespace and convert to uppercase
+    const normalized = icaoCode.trim().toUpperCase();
+    
+    // Validate format: exactly 4 alphanumeric characters
+    if (!/^[A-Z0-9]{4}$/.test(normalized)) {
+        throw new Error(`Invalid ICAO code format: "${icaoCode}". Must be exactly 4 alphanumeric characters (e.g., KJFK, CYYZ, EGLL)`);
+    }
+
+    console.log(`✅ ICAO normalized: "${icaoCode}" → "${normalized}"`);
+    return normalized;
+};
+
+/**
+ * Enhanced time filtering utility functions
  */
 export const createTimeWindow = (timeValue, timeUnit) => {
     const now = new Date();
@@ -45,12 +65,15 @@ export const isNotamActiveInWindow = (notam, timeWindow) => {
     const props = notam.properties;
     if (!props) return false;
 
-    // Parse NOTAM dates
+    // Parse NOTAM dates with enhanced validation
     const notamStart = props.effectiveStart ? new Date(props.effectiveStart) : null;
     const notamEnd = props.effectiveEnd ? new Date(props.effectiveEnd) : null;
 
     // Handle permanent NOTAMs
-    if (!notamEnd || props.effectiveEnd === 'PERM' || props.effectiveEnd === 'PERMANENT') {
+    if (!notamEnd || 
+        props.effectiveEnd === 'PERM' || 
+        props.effectiveEnd === 'PERMANENT' ||
+        isNaN(notamEnd?.getTime())) {
         // If NOTAM starts before our window ends, it's active
         return !notamStart || notamStart <= timeWindow.end;
     }
@@ -63,6 +86,9 @@ export const isNotamActiveInWindow = (notam, timeWindow) => {
     return isActive;
 };
 
+/**
+ * ENHANCED NOTAM fetch with bulletproof ICAO handling and improved error handling
+ */
 export const fetchNotams = async ({ 
     icaoCode, 
     notamType, 
@@ -74,14 +100,17 @@ export const fetchNotams = async ({
     timeUnit = 'hours',
     enableTimeFiltering = true 
 }) => {
+    // **CRITICAL FIX: Validate and normalize ICAO code first**
+    const normalizedIcao = validateAndNormalizeIcao(icaoCode);
+    
     // Create time window for filtering
     const timeWindow = createTimeWindow(timeValue, timeUnit);
     console.log(`🕐 Time window: ${timeWindow.start.toISOString()} to ${timeWindow.end.toISOString()} (${timeWindow.hours}h)`);
 
-    // --- 1. PRIMARY SOURCE: Always try FAA first ---
+    // --- 1. PRIMARY SOURCE: ALWAYS try FAA first for ALL ICAO codes ---
     const faaParams = new URLSearchParams({
         responseFormat: 'geoJson',
-        icaoLocation: icaoCode,
+        icaoLocation: normalizedIcao, // **FIXED: Use normalized uppercase ICAO**
         pageSize: 1000,
         pageNum: 1,
         sortBy: 'effectiveStartDate',
@@ -107,49 +136,94 @@ export const fetchNotams = async ({
         }
     };
 
-    console.log('Fetching NOTAMs from FAA:', proxyUrl);
-    const faaResponse = await fetch(proxyUrl, fetchOptions);
-    const faaData = await faaResponse.json();
-
-    let faaItems = faaData.items || [];
-
-    // --- 2. FALLBACK LOGIC: If Canadian ICAO AND FAA returned zero results, try NAV CANADA ---
-    if (icaoCode.startsWith('C') && faaItems.length === 0) {
-        console.log(`🍁 FAA returned no results for Canadian ICAO ${icaoCode}. Falling back to NAV CANADA.`);
+    console.log(`📡 Fetching NOTAMs from FAA for ${normalizedIcao}:`, proxyUrl);
+    
+    let faaItems = [];
+    let faaError = null;
+    
+    try {
+        const faaResponse = await fetch(proxyUrl, fetchOptions);
         
-        const navCanadaUrl = `https://plan.navcanada.ca/weather/api/alpha/?site=${icaoCode}&alpha=notam`;
-        proxyUrl = proxyConfig.url + encodeURIComponent(navCanadaUrl);
-        fetchOptions = { method: 'GET', headers: { 'Accept': 'application/json' } };
-
-        console.log('Fetching from NAV CANADA via proxy:', proxyUrl);
-        const navResponse = await fetch(proxyUrl, fetchOptions);
+        if (!faaResponse.ok) {
+            throw new Error(`FAA API HTTP Error: ${faaResponse.status} ${faaResponse.statusText}`);
+        }
         
-        if (!navResponse.ok) {
-            throw new Error(`NAV CANADA fallback failed (${navResponse.status}): ${await navResponse.text()}`);
+        const faaData = await faaResponse.json();
+        
+        // Check for API-level errors
+        if (faaData.error) {
+            throw new Error(`FAA API Error (${faaData.status || 'N/A'}): ${faaData.error} - ${faaData.message || 'No message.'}`);
         }
-
-        let navData;
-        if (proxyConfig.type === 'json') {
-            const proxyResponse = await navResponse.json();
-            navData = JSON.parse(proxyResponse.contents);
-        } else {
-            navData = await navResponse.json();
-        }
-
-        const navNotams = navData?.data || [];
-        console.log(`✅ Found ${navNotams.length} NOTAMs from NAV CANADA for ${icaoCode}`);
-        faaItems = navNotams.map(parseCanadianNotam);
+        
+        faaItems = faaData.items || [];
+        console.log(`✅ FAA returned ${faaItems.length} NOTAMs for ${normalizedIcao}`);
+        
+    } catch (error) {
+        faaError = error;
+        console.warn(`❌ FAA fetch failed for ${normalizedIcao}:`, error.message);
     }
 
-    if (faaData.error) {
-        throw new Error(`FAA API Error (${faaData.status || 'N/A'}): ${faaData.error} - ${faaData.message || 'No message.'}`);
+    // --- 2. FALLBACK LOGIC: Only use NAV CANADA if FAA returns ZERO results ---
+    if (faaItems.length === 0) {
+        console.log(`🔄 FAA returned zero NOTAMs for ${normalizedIcao}. Attempting NAV CANADA fallback...`);
+        
+        try {
+            const navCanadaUrl = `https://plan.navcanada.ca/weather/api/alpha/?site=${normalizedIcao}&alpha=notam`; // **FIXED: Use normalized ICAO**
+            proxyUrl = proxyConfig.url + encodeURIComponent(navCanadaUrl);
+            fetchOptions = { method: 'GET', headers: { 'Accept': 'application/json' } };
+
+            console.log(`🍁 Fetching from NAV CANADA for ${normalizedIcao}:`, proxyUrl);
+            const navResponse = await fetch(proxyUrl, fetchOptions);
+            
+            if (!navResponse.ok) {
+                throw new Error(`NAV CANADA HTTP Error: ${navResponse.status} ${navResponse.statusText}`);
+            }
+
+            let navData;
+            if (proxyConfig.type === 'json') {
+                const proxyResponse = await navResponse.json();
+                navData = JSON.parse(proxyResponse.contents);
+            } else {
+                navData = await navResponse.json();
+            }
+
+            const navNotams = navData?.data || [];
+            console.log(`✅ NAV CANADA returned ${navNotams.length} NOTAMs for ${normalizedIcao}`);
+            
+            if (navNotams.length > 0) {
+                faaItems = navNotams.map(parseCanadianNotam);
+                console.log(`🔄 Using NAV CANADA data as fallback for ${normalizedIcao}`);
+            } else {
+                console.log(`ℹ️ NAV CANADA also returned zero NOTAMs for ${normalizedIcao}`);
+            }
+
+        } catch (navError) {
+            console.warn(`❌ NAV CANADA fallback also failed for ${normalizedIcao}:`, navError.message);
+            
+            // If both FAA and NAV CANADA failed, throw the original FAA error
+            if (faaError && navError) {
+                throw new Error(`Both data sources failed. FAA: ${faaError.message}. NAV CANADA: ${navError.message}`);
+            }
+        }
     }
 
-    console.log(`✅ Found ${faaItems.length} total NOTAMs from ${faaItems[0]?.properties?.source || 'FAA'} for ${icaoCode}`);
+    // If we still have no NOTAMs and there was an FAA error, throw it
+    if (faaItems.length === 0 && faaError) {
+        throw faaError;
+    }
 
-    // --- 3. NEW: Apply time filtering if enabled ---
-    if (enableTimeFiltering) {
-        const filteredItems = faaItems.filter(notam => isNotamActiveInWindow(notam, timeWindow));
+    console.log(`📊 Total NOTAMs retrieved for ${normalizedIcao}: ${faaItems.length} (Source: ${faaItems[0]?.properties?.source || 'FAA'})`);
+
+    // --- 3. Apply time filtering if enabled ---
+    if (enableTimeFiltering && faaItems.length > 0) {
+        const filteredItems = faaItems.filter(notam => {
+            const isActive = isNotamActiveInWindow(notam, timeWindow);
+            if (!isActive) {
+                console.log(`⏰ Filtered out NOTAM ${notam.properties?.notamNumber || 'N/A'} - outside time window`);
+            }
+            return isActive;
+        });
+        
         console.log(`🎯 Time filtering: ${faaItems.length} → ${filteredItems.length} NOTAMs (${timeWindow.hours}h window)`);
         
         // Add debug info to each NOTAM
